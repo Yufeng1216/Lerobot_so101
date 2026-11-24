@@ -18,6 +18,7 @@ Python / PowerShell 语法在第一次出现时解释（标为 📘）。
 | 4 训练 | [`train.ps1`](#8-scriptstrainps1) | 训练入口和每个策略的参数预设 |
 | 4 训练 | [`lerobot_train_win.py`](#9-scriptslerobot_train_winpy) | 修复 Windows 上的 checkpoint 链接问题 |
 | 5 云端 | [`cloud/slurm/*`](#11-cloudslurm在-gpu-集群上训练) | 在 Linux GPU 集群上装环境、提交训练任务 |
+| 5 云端 | [`cloud/hf_jobs/train_pi05.py`](#14-cloudhf_jobstrain_pi05py) | 把 π₀.₅ 训练提交到租用的 HF GPU |
 | 6 评估 | [`make_gif.py`](#12-scriptsmake_gifpy) | 把一次评估试验剪成 README 用的 GIF |
 | 6 评估 | [`plot_results.py`](#13-scriptsplot_resultspy) | 从 `results/*.md` 画各点位成功率柱状图 |
 | 内部 | [LeRobot 内部做了什么](#10-lerobot-内部我们调用的命令在做什么) | 录制循环、数据集、训练循环、ACT 前向 |
@@ -917,6 +918,52 @@ ROW = re.compile(r"^\|\s*\d+\s*\|\s*([①②③④⑤])\s*\|\s*(✅|🟡|❌)\s*
   这里取出点位和结果两样。
 - 直接拼 SVG 文本：SVG 是用 XML 描述图形的文本格式，`<rect>` 是矩形（柱子），`<text>` 是文字。
   GitHub 能直接显示 SVG，所以不需要装 matplotlib。
+
+## 14. `cloud/hf_jobs/train_pi05.py`
+
+**问题：** π₀.₅ 有 41 亿个可训练参数，float32 全量微调要约 67 GB 显存，笔记本和集群的 V100 都放不下，只能租 Hugging Face 的 A100。
+
+**LeRobot 自带远程训练：** 训练命令加 `--job.target=a100-large`，`lerobot-train` 不在本机训练，而是：
+1. 在本机解析配置、确认数据集在 Hub 上；
+2. 把配置写成 `train_config.json`，上传到一个新的私有模型仓库；
+3. 在 HF 上启动一个任务，用官方镜像运行 `lerobot-train --config_path=<那个仓库>`；
+4. 训完把模型推到这个仓库。
+
+### 为什么用 Python 拼参数
+
+```python
+f"--rename_map={json.dumps(RENAME)}"
+```
+
+`rename_map` 是 JSON，PowerShell 5.1 会吃掉其中的引号（第 8 节）。在 Python 里拼好 `sys.argv` 再调用 `lerobot_train.main()`，没有引号问题。
+
+### 修 Windows 路径
+
+```python
+def build(cfg, repo_id, dest, tags=None):
+    path = original(cfg, repo_id, dest, tags=tags)
+    ...parent[key] = parent[key].replace("\\", "/")
+hf_jobs.build_remote_config_file = _fix_windows_paths(hf_jobs.build_remote_config_file)
+```
+
+LeRobot 把 `--policy.path` 存成 `Path`，Windows 上写进 JSON 变成 `lerobot\pi05_base`。远程是 Linux，读不懂，
+任务一开始就会失败。这里包住生成配置的函数，写完文件后把 `pretrained_path` 和 `output_dir` 里的 `\` 换回 `/`。
+和第 9 节的补丁是同一个问题，只是这次发生在"把配置发给别的机器"这一步。
+
+### `--dry-run`
+
+把提交函数换成"只打印配置"，不花钱就能检查发出去的 JSON。每次改参数后先 dry run。
+
+### 关键参数
+
+| 参数 | 值 | 原因 |
+|---|---|---|
+| `steps` / `scheduler_decay_steps` | 3000 / 3000 | 默认 3 万步约 70 小时（$175）。只改步数，学习率曲线按新步数完整走完；其余全用默认 |
+| `gradient_checkpointing` | true | 不存中间结果、反向时重算，用时间换显存；结果在数学上不变 |
+| `num_workers` | 10 | 测速时默认 4 个进程，GPU 每步要等 1.3 s 数据；机器有 12 个 CPU |
+| `save_freq` | = steps | 带优化器状态的完整 checkpoint 约 66 GB，只在最后存一次 |
+| `eval_steps` | 0 | 付费 GPU 上不做验证集评估 |
+| `--job.timeout` | 9h | 预计 7.3 小时，留余量；它不包括排队时间 |
 
 ---
 

@@ -6,6 +6,7 @@ This folder holds what runs **elsewhere**, for policies that do not fit the lapt
 | Folder | Where | Used for |
 |---|---|---|
 | `slurm/` | a Linux GPU cluster with the Slurm scheduler | Diffusion Policy at its default size (278 M params); SmolVLA at batch 32 |
+| `hf_jobs/` | rented Hugging Face GPUs (billed per second) | π₀.₅ (4.1 B trainable params, needs an 80 GB GPU in float32) |
 
 ## `slurm/`
 
@@ -45,3 +46,27 @@ Notes on the Linux environment (all handled in the scripts):
 - PyTorch is the CUDA 12.6 build: the CUDA 12.8 builds no longer include kernels for V100 GPUs.
 - Videos are decoded with PyAV (`--dataset.video_backend=pyav`); torchcodec's Linux wheel is built for CUDA 13.
 - `LD_LIBRARY_PATH` puts conda's C++ runtime before the system one.
+
+## `hf_jobs/`
+
+`train_pi05.py` submits a π₀.₅ fine-tuning run to [Hugging Face Jobs](https://huggingface.co/docs/huggingface_hub/guides/jobs)
+from the Windows laptop, using LeRobot's built-in `--job.target=<hardware>`.
+
+```bash
+python cloud/hf_jobs/train_pi05.py --dry-run                     # print the job config, submit nothing
+python cloud/hf_jobs/train_pi05.py --steps 200 --timeout 40m     # speed / memory test
+python cloud/hf_jobs/train_pi05.py --steps 3000 --timeout 9h     # the run used here
+```
+
+Before the first run:
+
+- a Hugging Face token with **write** access (fine-grained tokens need the Jobs permission), and credit on the account;
+- accept the license of [`google/paligemma-3b-pt-224`](https://huggingface.co/google/paligemma-3b-pt-224): π₀.₅ uses its tokenizer.
+
+Measured on `a100-large` ($2.50/h): ~8.3 s/step at batch 32 (float32 full fine-tune, gradient checkpointing),
+66.9 GB GPU memory. The default 30k steps would take ~70 h, so this project trains 3,000 steps with the
+learning-rate schedule shortened to match; everything else is the LeRobot default. `--timeout` does not count
+time spent queuing for a GPU.
+
+On Windows, LeRobot writes the model id into the job config as `lerobot\pi05_base`; the script restores the
+forward slash before the config is uploaded, otherwise the Linux job cannot find the model.
