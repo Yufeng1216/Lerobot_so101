@@ -97,7 +97,7 @@
 | `crop_ratio` | **0.95** | 训练时随机裁出 95% 的区域（推理时裁中心）。这是论文里的**数据增强**，让模型对相机的轻微偏移更鲁棒 |
 | `ema.type` | **warmup** | 保存一份权重的**指数滑动平均**（EMA）。扩散模型的标准做法，EMA 权重生成的动作更平滑稳定 |
 | `optimizer_lr` | 1e-4，余弦退火，500 步预热（默认） | 论文值 |
-| `down_dims` | **[256, 512, 1024]** | 默认值的一半。默认的 278M 参数在 8 GB 显存里放不下（见第 6 节），减半后 89M |
+| `down_dims` | 512 / 1024 / 2048（默认） | 278M 参数，需要 16 GB 以上显存（见第 6 节） |
 | `batch_size` | 8 | 和 ACT 一样 |
 | `steps` | 100,000 | 扩散模型要学整个分布，比回归难，通常需要更多步；约 53 个 epoch |
 | `save_freq` | 20,000 | 5 个 checkpoint |
@@ -105,49 +105,42 @@
 > **关于 EMA：** 开启后，checkpoint 里除了 `pretrained_model/`，还会多一个 `pretrained_model_ema/`。
 > 上传到 Hub 的是 EMA 权重，部署时也用 EMA 那份。
 
-## 6. 冒烟测试
+## 6. 显存：8 GB 放不下默认大小
 
-```powershell
-.\scripts\train.ps1 diffusion -Steps 200 -Name diffusion_smoke -NoPush --eval_steps=100 --trackio.enable=false
-```
-
-实测（RTX 3070 Laptop，batch 8）：
+本项目训练的是**默认大小**（278M）。笔记本上实测（RTX 3070 Laptop，batch 8）：
 
 | 配置 | 参数量 | 显存 | 每步 |
 |---|---|---|---|
 | 默认 U-Net `down_dims=(512,1024,2048)` | 278M | 超过 8 GB | 约 124 s（不可用） |
-| 本项目 `down_dims=(256,512,1024)` | 89M | 2.9 GB | 0.13 s |
+| 通道减半 `down_dims=(256,512,1024)` | 89M | 2.9 GB | 0.13 s |
+
+默认 U-Net 光是 fp32 的权重、梯度、Adam 状态和 EMA 副本就约 5.5 GB，再加激活值就超过 8 GB。
 
 > **显存不够时，Windows 不一定报 `CUDA out of memory`**：驱动会把放不下的部分挪到系统内存，
 > 训练不报错，但慢上百倍。如果 `nvidia-smi` 显示显存几乎占满、日志里 `updt_s` 异常大，就是这个原因。
 
-默认 U-Net 光是 fp32 的权重、梯度、Adam 状态和 EMA 副本就约 5.5 GB，所以笔记本上把通道数减半。
-这组通道数论文里也用过；图像编码器（ResNet18 + Spatial Softmax）不变。
-100,000 步 × 0.13 s ≈ **3.6 小时**（加上验证约 4 小时）。
+所以默认大小放到**更大显存的 GPU**（大学的 Slurm 集群，16 GB 以上）上训练。
+只有 8 GB 显卡又想在本地训，可以用 `train.ps1` 的 diffusion 预设：它把通道数减半（论文里也用过这组），
+其余设置相同。
 
-### 对照实验：默认大小（278M）
+## 7. 正式训练（Linux / 集群）
 
-为了确认减半有没有损失模型能力，默认大小的版本在一台更大显存的 GPU（大学的 Slurm 集群）上用**完全相同的其余设置**
-再训一次，两者构成模型容量的对照：
+集群是 Linux，直接用 `lerobot-train`，参数和第 5 节一致：
 
-| 训练 | `down_dims` | 参数量 |
-|---|---|---|
-| 笔记本 | 256 / 512 / 1024 | 89M |
-| 大显存 GPU | 512 / 1024 / 2048（默认） | 278M |
-
-在 Linux 上直接用 `lerobot-train`，参数和 `train.ps1` 的 diffusion 预设相同，只去掉 `--policy.down_dims`。
-
-## 7. 正式训练
-
-开始之前先确认 HF 登录没过期，否则训练结束时模型上传会失败：
-
-```powershell
-hf auth whoami
-.\scripts\train.ps1 diffusion
+```bash
+lerobot-train \
+    --dataset.repo_id=Yufeng1216/so101_pick_place --dataset.eval_split=0.1 --eval_steps=2000 \
+    --policy.type=diffusion --policy.device=cuda \
+    --policy.resize_shape=[240,320] --policy.crop_ratio=0.95 --ema.type=warmup \
+    --batch_size=8 --steps=100000 --save_freq=20000 --num_workers=8 \
+    --output_dir=outputs/train/diffusion_so101_pick_place --job_name=diffusion_so101_pick_place \
+    --policy.repo_id=Yufeng1216/diffusion_so101_pick_place
 ```
 
-训练曲线同样在 Trackio 里看（`trackio show --project so101`）。Diffusion 的 `train/loss` 是噪声预测的 MSE，
-它的数值和 ACT 的 loss **不能直接比较**，只看它自己的趋势。
+集群上的任务有时长上限，被停掉后用 `--config_path=<输出目录>/checkpoints/last/pretrained_model/train_config.json --resume=true` 接着训。
+训完把 `checkpoints/last/pretrained_model_ema` 拷回笔记本用于部署。
+
+Diffusion 的 `train/loss` 是噪声预测的 MSE，数值和 ACT 的 loss **不能直接比较**，只看它自己的趋势。
 
 ## 8. 在真机上运行
 

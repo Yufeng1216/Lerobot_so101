@@ -127,7 +127,7 @@ wrist 图像 ┘
 | 策略 | 参数量 | 训练位置 |
 |---|---|---|
 | ACT | 52M | 本地（RTX 3070 8 GB 足够） |
-| Diffusion Policy | 89M（U-Net 减半，见 05） | 本地 |
+| Diffusion Policy | 278M | 16 GB 以上显存（大学集群），见 05 |
 | SmolVLA | ~450M | 本地试小 batch，不行再上云 |
 | π₀.₅ | ~3B | 云端（官方示例按 80 GB 显卡配置） |
 

@@ -14,7 +14,7 @@ and comparing them against a **zero-shot baseline** that uses no demonstrations 
 | Policy | Paper | Params | Type | Trained on |
 |---|---|---|---|---|
 | **ACT** | [Zhao et al., 2023](https://arxiv.org/abs/2304.13705) | ~52 M | CVAE + Transformer, action chunking | local RTX 3070 (8 GB) |
-| **Diffusion Policy** | [Chi et al., 2023](https://arxiv.org/abs/2303.04137) | ~89 M (U-Net halved to fit 8 GB) | DDPM/DDIM denoising over action chunks | local RTX 3070 (8 GB) |
+| **Diffusion Policy** | [Chi et al., 2023](https://arxiv.org/abs/2303.04137) | ~278 M | DDPM/DDIM denoising over action chunks | university GPU cluster (Slurm) |
 | **SmolVLA** | [Shukor et al., 2025](https://arxiv.org/abs/2506.01844) | ~450 M | small VLM + flow-matching action expert | local / cloud GPU |
 | **π₀.₅** | [Physical Intelligence, 2025](https://arxiv.org/abs/2504.16054) | ~3 B | VLA, PaliGemma + flow-matching expert | cloud GPU (≥ 24 GB) |
 | **Zero-shot VLM + IK** (baseline) | — | ~2 B (VLM) | Qwen3-VL points at toy/box → table homography → IK → scripted grasp | no training |
@@ -27,8 +27,7 @@ the same protocol (see [docs/08_evaluation.md](docs/08_evaluation.md)).
 | Policy | Train steps | Train time | Success rate (n=20) | Model | Rollout video |
 |---|---|---|---|---|---|
 | ACT | 50k (≈27 epochs) | 4.0 h (RTX 3070 Laptop) | – | [act_so101_pick_place](https://huggingface.co/Yufeng1216/act_so101_pick_place) | – |
-| Diffusion Policy (89 M, laptop) | – | – | – | – | – |
-| Diffusion Policy (278 M default, larger GPU) | – | – | – | – | – |
+| Diffusion Policy | – | – | – | – | – |
 | SmolVLA | – | – | – | – | – |
 | π₀.₅ | – | – | – | – | – |
 | Zero-shot VLM + IK | 0 (no demos) | – | – | – | – |
