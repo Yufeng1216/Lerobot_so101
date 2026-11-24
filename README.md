@@ -31,22 +31,37 @@ Every policy is evaluated on the real robot with the same protocol
 ([docs/08_evaluation.md](docs/08_evaluation.md)): 5 start spots × 4 trials, 30 s each, spots in rotation.
 Success = toy released inside the box. Per-trial sheets are in [`results/`](results/).
 
-| Policy | Train steps | Train time | Success (n=20) | Grasped, not placed | Not grasped | Inference / chunk | Model | Clip |
-|---|---|---|---|---|---|---|---|---|
-| ACT | 50k (≈27 epochs) | 4.0 h, RTX 3070 Laptop | **50%** ([sheet](results/act.md)) | 2 | 8 | ~47 ms | [🤗](https://huggingface.co/Yufeng1216/act_so101_pick_place) | [gif](assets/act_success.gif) |
-| Diffusion Policy | 100k (≈53 epochs) | ≈4 h, Tesla V100 16 GB | **75%** ([sheet](results/diffusion.md)) | 1 | 4 | ~200 ms (DDIM, 10 steps) | [🤗](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) | [gif](assets/diffusion_success.gif) |
-| SmolVLA | 20k, batch 32 | training | – | – | – | – | – | – |
-| π₀.₅ | – | – | – | – | – | – | – | – |
-| Zero-shot VLM + IK | 0 (no demos) | – | – | – | – | – | – | – |
+| Policy | Steps × batch | Samples seen (epochs) | Train time | Success (n=20) | 95% CI | Grasped, not placed | Not grasped | Inference / chunk | Model | Clip |
+|---|---|---|---|---|---|---|---|---|---|---|
+| ACT | 50k × 8 | 400k (≈27) | 4.0 h, RTX 3070 Laptop | **50%** ([sheet](results/act.md)) | 30–70% | 2 | 8 | ~47 ms | [🤗](https://huggingface.co/Yufeng1216/act_so101_pick_place) | [gif](assets/act_success.gif) |
+| Diffusion Policy | 100k × 8 | 800k (≈53) | ≈4 h, Tesla V100 16 GB | **75%** ([sheet](results/diffusion.md)) | 53–89% | 1 | 4 | ~200 ms (DDIM, 10 steps) | [🤗](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) | [gif](assets/diffusion_success.gif) |
+| SmolVLA | 20k × 32 | 640k (≈43) | training | – | – | – | – | – | – | – |
+| π₀.₅ | – | – | – | – | – | – | – | – | – | – |
+| Zero-shot VLM + IK | 0 (no demos) | 0 | – | – | – | – | – | – | – | – |
+
+<sub>Epochs over the 15k-frame training split (90% of 16,717 frames). 95% CI: Wilson score interval.</sub>
 
 ![Per-spot success rate](assets/results.svg)
 
+### How to read this comparison
+
+- **Each policy uses its own standard recipe** (from the paper / LeRobot defaults), on the same 50
+  demonstrations and the same evaluation protocol. This answers *"which method works better when deployed
+  as intended on this task?"*, not *"which architecture is better at equal compute"*.
+- **Training steps are not comparable across rows.** Batch sizes differ (8 vs 32), model sizes differ by ~70×
+  (52 M to 3.6 B), and SmolVLA / π₀.₅ start from pretrained weights while ACT and Diffusion start from scratch.
+  *Samples seen* and *train time* are listed so the budgets can be compared directly.
+- **n = 20 is small.** The 95% intervals of ACT (30–70%) and Diffusion (53–89%) overlap, and
+  Fisher's exact test gives p ≈ 0.19 for the difference. Read the ranking as a trend, not a settled result.
+  Per-spot numbers (n = 4 each) are even noisier: 1/4 has a 95% interval of 5–70%.
+
 **Observations so far**
 
-- **Diffusion Policy beats ACT by 25 points** on the same 50 demonstrations. The gap is in grasping:
+- **Diffusion Policy is ahead of ACT** (75% vs 50%, not yet significant at n = 20). The gap is in grasping:
   ACT fails to pick up the toy 8/20 times, Diffusion 4/20. Once grasped, both almost always place it.
 - **Spot ⑤ is hard for both** (1/4 each), while Diffusion is 14/16 on spots ①–④. Two very different
-  models failing at the same spot points at the data or the geometry of that spot, not the architecture.
+  models failing at the same spot suggests the data or the geometry of that spot rather than the architecture
+  (with n = 4 per spot, this is a lead to investigate, not a conclusion).
 - **Sampler matters for Diffusion.** The default 100-step DDPM takes ~1.5 s per action chunk on the laptop GPU,
   longer than the 1.07 s the chunk lasts, so the arm would stall; 10-step DDIM is ~10× faster with the same
   offline action error ([docs/05](docs/05_diffusion_policy.md#8-在真机上运行)).
