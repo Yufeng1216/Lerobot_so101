@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.ipynb_checkpoints/
+
+# Training outputs / checkpoints / logs (large; push models to the HF Hub instead)
+outputs/
+wandb/
+.trackio/
+*.safetensors
+*.pt
+*.ckpt
+
+# Local datasets (push datasets to the HF Hub instead)
+data/
+datasets/
+
+# Local machine config (COM ports, camera indices) — copy from config/robot.example.json
+config/robot.json
+
+# Secrets
+.env
+*.token
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
