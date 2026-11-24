@@ -2,7 +2,12 @@
 
 Reproducing four modern robot-learning policies on a low-cost **SO-101** arm with
 [🤗 LeRobot](https://github.com/huggingface/lerobot), end to end on real hardware:
-teleoperated data collection → training → deployment and evaluation on the real robot.
+teleoperated data collection → training → deployment and evaluation on the real robot —
+and comparing them against a **zero-shot baseline** that uses no demonstrations at all
+(an off-the-shelf vision-language model for perception + inverse kinematics for motion).
+
+**Task:** pick up a plush toy from one of 5 marked spots and place it in a cardboard box.
+**Dataset:** 50 teleoperated demonstrations, [`Yufeng1216/so101_pick_place`](https://huggingface.co/datasets/Yufeng1216/so101_pick_place).
 
 > 中文教程见 [`docs/`](docs/)（所有教程用中文写成，命令可直接复制运行）。
 
@@ -12,6 +17,7 @@ teleoperated data collection → training → deployment and evaluation on the r
 | **Diffusion Policy** | [Chi et al., 2023](https://arxiv.org/abs/2303.04137) | ~263 M | DDPM/DDIM denoising over action chunks | local RTX 3070 (8 GB) |
 | **SmolVLA** | [Shukor et al., 2025](https://arxiv.org/abs/2506.01844) | ~450 M | small VLM + flow-matching action expert | local / cloud GPU |
 | **π₀.₅** | [Physical Intelligence, 2025](https://arxiv.org/abs/2504.16054) | ~3 B | VLA, PaliGemma + flow-matching expert | cloud GPU (≥ 24 GB) |
+| **Zero-shot VLM + IK** (baseline) | — | ~2 B (VLM) | Qwen3-VL points at toy/box → table homography → IK → scripted grasp | no training |
 
 ## Results
 
@@ -24,6 +30,7 @@ the same protocol (see [docs/08_evaluation.md](docs/08_evaluation.md)).
 | Diffusion Policy | – | – | – | – | – |
 | SmolVLA | – | – | – | – | – |
 | π₀.₅ | – | – | – | – | – |
+| Zero-shot VLM + IK | 0 (no demos) | – | – | – | – |
 
 ## Hardware
 
@@ -61,6 +68,8 @@ New to the tooling? Start with [docs/how_this_repo_works.md](docs/how_this_repo_
 | 6 | SmolVLA | docs/06_smolvla.md |
 | 7 | π₀.₅ | docs/07_pi05.md |
 | 8 | Evaluation protocol and comparison | [docs/08_evaluation.md](docs/08_evaluation.md) |
+| 9 | Zero-shot baseline: VLM + IK, no demonstrations | [docs/09_zero_shot_vlm.md](docs/09_zero_shot_vlm.md) |
+| – | Code walkthrough (every script explained) | [docs/code_walkthrough.md](docs/code_walkthrough.md) |
 
 ## License
 
