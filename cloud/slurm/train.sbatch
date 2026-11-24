@@ -75,7 +75,7 @@ case "$POLICY" in
             --policy.path=lerobot/smolvla_base
             '--rename_map={"observation.images.top":"observation.images.camera1","observation.images.wrist":"observation.images.camera2"}'
             --batch_size=32
-            --steps=20000
+            --steps=20000                   # V100 has no fast bf16: ~2.5 s/step, ~14 h = two 8 h jobs
             --policy.scheduler_decay_steps=20000
             --save_freq=5000                # short gaps: a time-out loses at most 5k steps
         )

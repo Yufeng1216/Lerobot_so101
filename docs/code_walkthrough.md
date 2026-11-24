@@ -256,7 +256,7 @@ HF_LEROBOT_CALIBRATION = Path(os.getenv("HF_LEROBOT_CALIBRATION", HF_LEROBOT_HOM
 ```powershell
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet("calibrate-follower", "calibrate-leader", "teleop", "record", "rollout")]
+    [ValidateSet("calibrate-follower", "calibrate-leader", "teleop", "record", "rollout", "eval")]
     [string]$Command,
     [switch]$Cameras,
     [int]$Episodes = 50,
@@ -324,6 +324,18 @@ switch ($Command) {
 | `--dataset.no_stamp=true` | LeRobot 默认在数据集名后加 `_年月日_时分秒`。关掉它，名字就是固定的 `so101_pick_place`，训练命令和 `-Resume` 都能直接引用 |
 | `--dataset.streaming_encoding=true` | 边录边把画面编码成视频。否则会先存成上千张 PNG，每条结束后再统一编码，要等很久 |
 | `-Resume` 时加 `--dataset.root=...` | LeRobot 恢复录制时必须知道数据集在硬盘上的确切位置 |
+
+`rollout` 和 `eval` 都调用 `lerobot-rollout`，区别在 `--strategy.type`：
+
+| 命令 | strategy | 做什么 |
+|---|---|---|
+| `rollout` | `base` | 策略一直控制从臂，跑 `-Duration` 秒，不录数据。用来试跑 |
+| `eval` | `episodic` | 按 [08 评估协议](08_evaluation.md)：默认 20 次试验，每次之间有复位阶段（用主臂摆回从臂），每次录成一条 episode |
+
+`eval` 的几个细节：
+- 数据集名是 `rollout_eval_<Name>`：LeRobot 规定 rollout 录的数据集名字必须以 `rollout_` 开头，否则直接报错。
+- `-Episodes` 没写时默认 20 而不是 record 的 50：`$PSBoundParameters.ContainsKey("Episodes")` 判断用户有没有显式传这个参数。
+- `--dataset.push_to_hub=false`：评估录像只留在本地。
 
 ### 执行前的两道检查（只针对 record）
 
@@ -841,7 +853,7 @@ srun lerobot-train "${COMMON[@]}" "${PRESET[@]}"
 
 和 `train.ps1` 一样分成"所有策略共用的参数"和"每个策略的预设"。`( ... )` 是 bash 数组，`"${COMMON[@]}"` 把数组展开成一个个参数。
 集群上的 diffusion 预设和笔记本的唯一区别是**不减半 U-Net 通道数**：V100 有 16 GB 显存，能放下论文默认的 278M 参数。
-smolvla 预设和笔记本的区别是 batch 从 8 提到 32、步数从 3 万降到 2 万，并且每 5000 步存一次（超时重提交损失更少）。
+smolvla 预设和笔记本的区别是 batch 从 8 提到 32、步数从 3 万降到 2 万，每 5000 步存一次。V100 跑 bf16 很慢（实测 2.47 s/步），2 万步约 14 小时，要分两个 8 小时任务：第一个超时后再提交一次，从最近的 checkpoint 续训，最多损失 5000 步之内的进度。
 `rename_map` 整个参数用单引号包住：bash 里单引号内的 `"` 原样传给程序（PowerShell 5.1 里则要写成 `\"`，见第 8 节）。
 
 > `.sh` 和 `.sbatch` 必须用 Linux 换行符（LF），否则 bash 会报 `$'\r': command not found`。

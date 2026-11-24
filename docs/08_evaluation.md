@@ -14,21 +14,24 @@
 - 每次最长 **30 秒**
 - 顺序：①②③④⑤ 循环 4 轮（避免一个点连续测导致的偏差）
 
-运行（录下评估视频，以后做展示用）：
+运行（每次试验都录成一条 episode，留作展示视频）：
 
 ```powershell
-lerobot-rollout --strategy.type=episodic `
-  --policy.path=<checkpoint 或 Hub 模型> `
-  --robot.type=so101_follower --robot.port=COM3 --robot.id=so101_follower `
-  --robot.cameras="{ top: {type: opencv, index_or_path: 1, width: 640, height: 480, fps: 30, fourcc: MJPG}, wrist: {type: opencv, index_or_path: 2, width: 640, height: 480, fps: 30, fourcc: MJPG} }" `
-  --teleop.type=so101_leader --teleop.port=COM4 --teleop.id=so101_leader `
-  --dataset.repo_id=Yufeng1216/eval_<策略名> `
-  --dataset.num_episodes=20 --dataset.episode_time_s=30 --dataset.reset_time_s=25 `
-  --dataset.single_task="Pick up the blue plush toy and place it in the cardboard box."
+.\scripts\robot.ps1 eval -Policy <checkpoint 目录或 Hub 模型> -Name <策略名>
 ```
 
-（PowerShell 里一条命令换行用反引号 `` ` ``。）评估数据集名字必须以 `eval_` 开头，这是 LeRobot 的约定。
-复位阶段可以用主臂把从臂摆回起始姿态。
+例如 ACT：
+
+```powershell
+.\scripts\robot.ps1 eval -Policy outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model -Name act
+```
+
+- 背后是 `lerobot-rollout --strategy.type=episodic`：策略控制从臂做一次试验，然后进入复位阶段，
+  这时用**主臂**把从臂带回起始姿态、把玩具放到下一个点。
+- 键盘：→ 提前结束本次试验或复位；← 作废本次、重做；Esc 停止。
+- 录下的数据集叫 `Yufeng1216/rollout_eval_<策略名>`，存在 `data/` 里，不上传。
+  LeRobot 规定 rollout 录的数据集名字必须以 `rollout_` 开头。
+- 主臂和从臂都要通电（12V 电源），否则会报 `Missing motor IDs`。
 
 ## 判定标准
 

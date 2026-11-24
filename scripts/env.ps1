@@ -13,5 +13,10 @@
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $env:HF_LEROBOT_HOME = Join-Path $repoRoot "data"
 $env:HF_LEROBOT_CALIBRATION = Join-Path $repoRoot "config\calibration"
+# Python's UTF-8 mode. Without it, text files default to the Windows code page (cp936 on a
+# Chinese system). LeRobot writes a temporary ffmpeg file list holding the absolute video paths;
+# if the repo path has non-ASCII characters (e.g. a Chinese "Desktop" folder), ffmpeg can't read that list and
+# saving the 2nd episode of a recording fails with "[Errno 22] Invalid argument: ...ffconcat".
+$env:PYTHONUTF8 = "1"
 # huggingface_hub warns on every download that Windows can't make symlinks; it works without them.
 $env:HF_HUB_DISABLE_SYMLINKS_WARNING = "1"

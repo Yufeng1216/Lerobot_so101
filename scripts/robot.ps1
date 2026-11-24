@@ -11,6 +11,8 @@
   .\scripts\robot.ps1 record -Name so101_pick_place -Episodes 10
   .\scripts\robot.ps1 record -Name so101_pick_place -Episodes 10 -Resume   # add 10 more episodes
   .\scripts\robot.ps1 rollout -Policy outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model
+  .\scripts\robot.ps1 eval -Policy outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model -Name act
+      # 20 recorded trials (docs/08_evaluation.md) -> local dataset <hf_user>/rollout_eval_act
 
   Any extra arguments are passed straight through to the LeRobot command, e.g.
   .\scripts\robot.ps1 record -Name test -Episodes 2 --dataset.episode_time_s=20
@@ -18,17 +20,17 @@
 #>
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet("calibrate-follower", "calibrate-leader", "teleop", "record", "rollout")]
+    [ValidateSet("calibrate-follower", "calibrate-leader", "teleop", "record", "rollout", "eval")]
     [string]$Command,
 
     [switch]$Cameras,          # teleop: also stream the cameras
-    [string]$Name,             # record: dataset name (repo id becomes <hf_user>/<Name>)
-    [int]$Episodes = 50,       # record: number of episodes (with -Resume: number of EXTRA episodes)
+    [string]$Name,             # record: dataset name (repo id becomes <hf_user>/<Name>); eval: policy label
+    [int]$Episodes = 50,       # record: number of episodes (with -Resume: number of EXTRA episodes); eval: default 20
     [int]$EpisodeTime = 30,    # record: max seconds per episode (press Right Arrow to end early)
     [int]$ResetTime = 25,      # record: max seconds to put the scene back (press Right Arrow to skip the rest)
     [switch]$Resume,           # record: append to an existing dataset instead of creating it
     [switch]$NoPush,           # record: keep the dataset local, don't upload to the Hub
-    [string]$Policy,           # rollout: local checkpoint dir or Hub repo id
+    [string]$Policy,           # rollout / eval: local checkpoint dir or Hub repo id
     [int]$Duration = 0,        # rollout: seconds, 0 = until Ctrl+C
     [switch]$DryRun,
 
@@ -112,6 +114,30 @@ switch ($Command) {
             "--display_data=true"
         )
         if ($Duration -gt 0) { $argsList += "--duration=$Duration" }
+    }
+    "eval" {
+        # The evaluation protocol of docs/08: the policy drives each trial, the leader arm is
+        # used during the reset phase to put the follower back. Every trial is recorded as an
+        # episode (video for the write-up). Keyboard: Right Arrow = end trial / reset early,
+        # Left Arrow = redo the trial, Esc = stop. The dataset stays local (no Hub upload).
+        if (-not $Policy) { throw "eval needs -Policy <checkpoint dir or hub repo id>" }
+        if (-not $Name) { throw "eval needs -Name <policy label>, e.g. -Name act" }
+        if (-not $PSBoundParameters.ContainsKey("Episodes")) { $Episodes = 20 }
+        $exe = "lerobot-rollout"
+        # LeRobot requires rollout datasets to be named rollout_*.
+        $repoId = "$($cfg.hf_user)/rollout_eval_$Name"
+        $argsList = @("--strategy.type=episodic", "--policy.path=$Policy") + $follower + $leader + @(
+            $cameraArg,
+            "--dataset.repo_id=$repoId",
+            "--dataset.no_stamp=true",
+            "--dataset.num_episodes=$Episodes",
+            "--dataset.episode_time_s=$EpisodeTime",
+            "--dataset.reset_time_s=$ResetTime",
+            "--dataset.single_task=$($cfg.task)",
+            "--dataset.streaming_encoding=true",
+            "--dataset.push_to_hub=false",
+            "--display_data=true"
+        )
     }
 }
 
