@@ -65,6 +65,7 @@ Lerobot/
 │   ├── inspect_dataset.py 录完后检查数据质量（空闲占比、开头等待、缩略图）
 │   ├── robot.ps1          读 config/robot.json，拼好标定/遥操作/录制/部署命令
 │   ├── train.ps1          训练入口：每个策略的参数预设
+│   ├── bench_dataloader.py 测试不同数据加载设置的速度（训练前调优用）
 │   └── lerobot_train_win.py  Windows 修复版 lerobot-train（见 docs/04_act.md）
 ├── docs/                  中文教程，一个阶段一个文件
 ├── data/                  录好的数据集（不上传 git，HF Hub 上有一份）

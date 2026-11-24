@@ -111,6 +111,9 @@ t= 9.3s  主臂(action)=  1.4  从臂(state)=  8.1   ← 主臂已捏到底，�
 
 ## 5. 先录一个测试集（2 条，不上传）
 
+> 本项目实际用过的测试集名字是 `so101_pick_toy_test` 和 `so101_pick_toy_test2`；
+> 因为用了固定名字（不加时间戳），同名数据集已存在时 LeRobot 会拒绝创建，所以重录测试集要换个名字。
+
 ```powershell
 .\scripts\robot.ps1 record -Name so101_pick_toy_test -Episodes 2 -EpisodeTime 20 -ResetTime 10 -NoPush
 ```
@@ -155,22 +158,73 @@ lerobot-replay --robot.type=so101_follower --robot.port=COM3 --robot.id=so101_fo
 
 测试集没问题就可以删掉（它在 `data\Yufeng1216\so101_pick_toy_test`）。
 
-## 6. 正式录制（50 条，自动上传）
+## 6. 正式录制（5 批 × 10 条，自动上传）
+
+### 摆场
+
+1. 快递盒四角用**小块浅色胶带**标出（或直接粘在桌上），整个项目期间不再移动。
+2. 5 个玩具起始点：在玩具**正下方**贴小标记（玩具放上去就盖住，相机基本拍不到）。
+   点要在从臂舒服够得到的范围内，彼此相隔 8–15 cm，玩具朝向保持一致。
+3. 相机固定后，从录制到最后评估都**不再动**；标记也不要撕。
+   （训练和测试时画面不一致就是分布偏移，会直接拉低成功率。）
+4. 摆完先用遥操作在每个点各试抓一次。
+
+### 录制
+
+每批 10 条，顺序 ①①②②③③④④⑤⑤，5 批正好每个点 10 条。第一批：
 
 ```powershell
-.\scripts\robot.ps1 record -Name so101_pick_toy -Episodes 50
+.\scripts\robot.ps1 record -Name so101_pick_place -Episodes 10 -ResetTime 25
 ```
 
-建议**分几次录**，每次 10 条左右，避免疲劳导致动作质量下降。第一次录完 10 条按 Esc 结束，之后用 `-Resume` 追加：
+之后每批追加（`-Episodes` 是**这次要追加的条数**，不是总数）：
 
 ```powershell
-.\scripts\robot.ps1 record -Name so101_pick_toy -Episodes 10 -Resume
+.\scripts\robot.ps1 record -Name so101_pick_place -Episodes 10 -ResetTime 25 -Resume
 ```
 
-注意：`-Resume` 时 `-Episodes` 是**这次要追加的条数**，不是总数。
+节奏要点：
 
-录完后在网页上查看数据集（每条 episode 的视频和关节曲线）：
-<https://huggingface.co/spaces/lerobot/visualize_dataset?path=/Yufeng1216/so101_pick_toy/episode_0>
+- 复位 25 秒是上限：在复位阶段就把玩具放好、主臂摆回起始姿态，然后**按 → 跳过剩余时间**。
+- 听到 "Recording episode" **立刻**开始动。
+- 放进盒子 → 回到起始姿态 → **马上**按 →。
+- 录制中手和身体不要进入俯视画面。
+- 每批录完，等终端回到提示符（上传完成）再开始下一批。
+
+### 每批录完都检查
+
+```powershell
+python scripts/inspect_dataset.py Yufeng1216/so101_pick_place --frames
+```
+
+它会给每条 episode 打印时长、空闲占比、开头等待、结尾等待和夹爪最大张开度，并标出可疑的条目
+（`NO MOTION`、`slow start`、`idle tail` 等）。`--frames` 会在 `outputs/dataset_check/` 下给每条生成一张
+缩略图（两路相机各 6 帧），可以快速确认是否成功。
+
+也可以在网页上看（同步播放两路视频和关节曲线）：
+<https://huggingface.co/spaces/lerobot/visualize_dataset?path=/Yufeng1216/so101_pick_place/episode_0>
+
+## 6.5 迭代记录：为什么第一版数据集被弃用
+
+数据质量是一步步迭代出来的，这里记下过程（面试时可以讲）：
+
+| 版本 | 问题 | 改进 |
+|---|---|---|
+| 测试集 1（2 条） | 夹爪只张开 44%，只捏到玩具边缘；第 2 条全程没动 | 张大到 70–80% 再包住玩具；从正上方下降 |
+| `so101_pick_toy`（10 条，已弃用） | 第 0 条没动；6 条开头**等了约 6 秒**才动；画面里出现人手；复位 15 秒不够用 | 复位改为 25 秒并允许跳过；听到提示立刻开始 |
+| **`so101_pick_place`（50 条，最终版）** | 无标记问题 | — |
+
+两版的量化对比（`inspect_dataset.py` 统计）：
+
+| 指标 | `so101_pick_toy` | `so101_pick_place` |
+|---|---|---|
+| 可用条数 | 9 / 10 | **50 / 50** |
+| 平均时长 | ~22 s | **~11 s** |
+| 空闲占比（不含空 episode） | 46% | **18%** |
+| 开头等待 > 3 s 的条数 | 6 | **0** |
+
+为什么"开头等待"这么重要：策略学的是"看到这个画面 → 做这个动作"。如果示范开头总是空等几秒，
+起始画面对应的"正确标签"就是"不动"，部署时策略可能一直停在起始姿态。
 
 ## 7. 常见问题
 
