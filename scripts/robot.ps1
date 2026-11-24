@@ -8,9 +8,9 @@
   .\scripts\robot.ps1 calibrate-leader
   .\scripts\robot.ps1 teleop                 # leader drives follower, no camera
   .\scripts\robot.ps1 teleop -Cameras        # ... with the camera stream shown in Rerun
-  .\scripts\robot.ps1 record -Name pick_toy -Episodes 50
-  .\scripts\robot.ps1 record -Name pick_toy -Episodes 10 -Resume   # add 10 more episodes
-  .\scripts\robot.ps1 rollout -Policy outputs/train/act_pick_toy/checkpoints/last/pretrained_model
+  .\scripts\robot.ps1 record -Name so101_pick_place -Episodes 10
+  .\scripts\robot.ps1 record -Name so101_pick_place -Episodes 10 -Resume   # add 10 more episodes
+  .\scripts\robot.ps1 rollout -Policy outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model
 
   Any extra arguments are passed straight through to the LeRobot command, e.g.
   .\scripts\robot.ps1 record -Name test -Episodes 2 --dataset.episode_time_s=20
@@ -25,7 +25,7 @@ param(
     [string]$Name,             # record: dataset name (repo id becomes <hf_user>/<Name>)
     [int]$Episodes = 50,       # record: number of episodes (with -Resume: number of EXTRA episodes)
     [int]$EpisodeTime = 30,    # record: max seconds per episode (press Right Arrow to end early)
-    [int]$ResetTime = 15,      # record: seconds to put the scene back between episodes
+    [int]$ResetTime = 25,      # record: max seconds to put the scene back (press Right Arrow to skip the rest)
     [switch]$Resume,           # record: append to an existing dataset instead of creating it
     [switch]$NoPush,           # record: keep the dataset local, don't upload to the Hub
     [string]$Policy,           # rollout: local checkpoint dir or Hub repo id
