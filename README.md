@@ -62,6 +62,10 @@ New to the tooling? Start with [docs/how_this_repo_works.md](docs/how_this_repo_
 | 7 | π₀.₅ | docs/07_pi05.md |
 | 8 | Evaluation protocol and comparison | [docs/08_evaluation.md](docs/08_evaluation.md) |
 
+## License
+
+MIT — see [LICENSE](LICENSE).
+
 ## Acknowledgements
 
 Built on [LeRobot](https://github.com/huggingface/lerobot) (Apache-2.0) and the
