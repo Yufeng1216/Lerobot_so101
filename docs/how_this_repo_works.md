@@ -127,7 +127,6 @@ Lerobot/
 │   ├── inspect_dataset.py 录完后检查数据质量（空闲占比、开头等待、缩略图）
 │   ├── robot.ps1          读 config/robot.json，拼好标定/遥操作/录制/部署命令
 │   ├── train.ps1          训练入口：每个策略的参数预设
-│   ├── bench_dataloader.py 测试不同数据加载设置的速度（训练前调优用）
 │   ├── lerobot_train_win.py  Windows 修复版 lerobot-train（见 docs/04_act.md）
 │   └── align_camera.py    相机被碰歪后，对照录制时的画面把它摆回原位
 ├── cloud/                 在别的机器上训练（笔记本 8 GB 显存放不下的模型）

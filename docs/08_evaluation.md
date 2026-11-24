@@ -77,4 +77,4 @@ python scripts/make_gif.py --repo-id Yufeng1216/rollout_eval_act --episode 18 --
 python scripts/plot_results.py
 ```
 
-两个脚本的代码讲解见 [code_walkthrough.md](code_walkthrough.md#12-scriptsmake_gifpy)。
+两个脚本的代码讲解见 [code_walkthrough.md](code_walkthrough.md#11-scriptsmake_gifpy)。

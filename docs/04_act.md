@@ -211,7 +211,7 @@ trackio show --project so101
 ```
 
 `-Policy` 也可以填 Hub 上的模型名 `Yufeng1216/act_so101_pick_place`。不过在 Windows 上，LeRobot 可能把名字里的 `/`
-转成 `\` 导致找不到模型（训练时遇到过同样的问题，见 code_walkthrough 第 9 节），所以建议填本地路径。
+转成 `\` 导致找不到模型（训练时遇到过同样的问题，见 code_walkthrough 第 8 节），所以建议填本地路径。
 
 安全注意：
 

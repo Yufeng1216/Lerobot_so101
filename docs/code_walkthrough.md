@@ -14,14 +14,13 @@ Python / PowerShell 语法在第一次出现时解释（标为 📘）。
 | 2 配置 | [`robot.ps1`](#4-scriptsrobotps1) | 从配置文件拼出标定 / 遥操作 / 录制 / 部署命令 |
 | 3 数据 | [`check_cameras.py`](#5-scriptscheck_cameraspy) | 录制前的相机预检查 |
 | 3 数据 | [`inspect_dataset.py`](#6-scriptsinspect_datasetpy) | 录制后的数据质量报告 |
-| 4 训练 | [`bench_dataloader.py`](#7-scriptsbench_dataloaderpy) | 找出最快的数据加载设置 |
-| 4 训练 | [`train.ps1`](#8-scriptstrainps1) | 训练入口和每个策略的参数预设 |
-| 4 训练 | [`lerobot_train_win.py`](#9-scriptslerobot_train_winpy) | 修复 Windows 上的 checkpoint 链接问题 |
-| 5 云端 | [`cloud/slurm/*`](#11-cloudslurm在-gpu-集群上训练) | 在 Linux GPU 集群上装环境、提交训练任务 |
-| 5 云端 | [`cloud/hf_jobs/train_pi05.py`](#14-cloudhf_jobstrain_pi05py) | 把 π₀.₅ 训练提交到租用的 HF GPU |
-| 6 评估 | [`make_gif.py`](#12-scriptsmake_gifpy) | 把一次评估试验剪成 README 用的 GIF |
-| 6 评估 | [`plot_results.py`](#13-scriptsplot_resultspy) | 从 `results/*.md` 画各点位成功率柱状图 |
-| 内部 | [LeRobot 内部做了什么](#10-lerobot-内部我们调用的命令在做什么) | 录制循环、数据集、训练循环、ACT 前向 |
+| 4 训练 | [`train.ps1`](#7-scriptstrainps1) | 训练入口和每个策略的参数预设 |
+| 4 训练 | [`lerobot_train_win.py`](#8-scriptslerobot_train_winpy) | 修复 Windows 上的 checkpoint 链接问题 |
+| 5 云端 | [`cloud/slurm/*`](#10-cloudslurm在-gpu-集群上训练) | 在 Linux GPU 集群上装环境、提交训练任务 |
+| 5 云端 | [`cloud/hf_jobs/train_pi05.py`](#13-cloudhf_jobstrain_pi05py) | 把 π₀.₅ 训练提交到租用的 HF GPU |
+| 6 评估 | [`make_gif.py`](#11-scriptsmake_gifpy) | 把一次评估试验剪成 README 用的 GIF |
+| 6 评估 | [`plot_results.py`](#12-scriptsplot_resultspy) | 从 `results/*.md` 画各点位成功率柱状图 |
+| 内部 | [LeRobot 内部做了什么](#9-lerobot-内部我们调用的命令在做什么) | 录制循环、数据集、训练循环、ACT 前向 |
 
 ---
 
@@ -133,7 +132,8 @@ if __name__ == "__main__":
 
 - `argparse`：声明这个脚本接受哪些参数、类型、默认值。`args.max_cameras` 就是用户传入的值（`-` 会自动变成 `_`）。
 - 📘 `if __name__ == "__main__":`：只有**直接运行**这个文件时才执行 `main()`；被别的文件 `import` 时不执行。
-  后面 `bench_dataloader.py` 会讲到，在 Windows 上这一行**必不可少**。
+  在 Windows 上这一行**必不可少**：Windows 的多进程只支持 spawn 方式，每个子进程是一个全新的 Python，
+  会重新 `import` 你的脚本。不加这一行，训练时的数据加载子进程 import 脚本时又会启动一批子进程，无限套娃。
 
 ---
 
@@ -471,69 +471,7 @@ picks = np.linspace(lo, hi, 6).astype(int)
 
 ---
 
-## 7. `scripts/bench_dataloader.py`
-
-**问题：** 冒烟测试显示每步约 1.4 秒，其中约 1 秒在等数据（`data_s`）。要不要加 worker、换解码器？
-
-**结果（50 条数据集，batch 8，ACT 的取数方式）：**
-
-| 解码器 | 4 进程 | 8 进程 | 12 进程 |
-|---|---|---|---|
-| **torchcodec** | **0.062 s/batch** | 0.081 | 0.073 |
-| pyav | 0.135 | 0.141 | 0.127 |
-
-结论：默认的 torchcodec + 4 进程已经最快；进程再多反而变慢（进程之间争抢 CPU 和内存带宽）。
-稳定状态下数据加载远快于 GPU 计算（约 0.4 s/步），所以冒烟测试里的 1 秒是启动开销，不是瓶颈（详见第 10 节）。
-
-### 加载方式和 ACT 训练完全一致
-
-```python
-dataset = LeRobotDataset(
-    repo_id,
-    delta_timestamps={"action": [i / fps for i in range(chunk)]},
-    video_backend=backend,
-)
-```
-
-- `delta_timestamps`：告诉数据集"取样本时，每个键要哪些**相对时间**的帧"。
-  `action: [0, 1/30, 2/30, ..., 99/30]` 表示从当前帧开始的 100 个动作，正是 ACT 的动作块。
-  图像没写，就只取当前帧。
-- 所以每个样本 = 2 张 480×640 图像（要从视频里解码）+ 6 维状态 + 100×6 的动作块。
-- `video_backend`：用哪个库解码视频。`torchcodec`（PyTorch 官方）或 `pyav`（FFmpeg 的 Python 封装）。
-
-### DataLoader
-
-```python
-loader = torch.utils.data.DataLoader(
-    dataset, batch_size=batch_size, shuffle=True,
-    num_workers=workers, persistent_workers=workers > 0, prefetch_factor=4,
-    pin_memory=True, multiprocessing_context="spawn",
-)
-```
-
-- `num_workers`：开几个**子进程**并行读数据。CPU 解码是瓶颈，多开几个进程就能并行解码。
-- `persistent_workers`：每个 epoch 结束后不销毁子进程。Windows 上启动一个子进程要约 19 秒，不能反复重启。
-- `prefetch_factor=4`：每个子进程提前准备 4 个 batch，GPU 一要就有。
-- `pin_memory`：把数据放在"锁页内存"里，拷到 GPU 更快。
-- `multiprocessing_context="spawn"`：Windows **只支持** spawn 方式：每个子进程是一个全新的 Python，
-  会重新 `import` 你的脚本。这就是为什么 `if __name__ == "__main__":` 在 Windows 上**必不可少**：
-  不加的话，每个子进程 import 脚本时又会启动一批子进程，无限套娃。
-
-### 计时
-
-```python
-for _ in range(5): next(it)          # 预热：子进程启动、第一次解码
-start = time.perf_counter()
-for _ in range(n_batches): next(it)
-return n_batches / (time.perf_counter() - start)
-```
-
-先丢掉前 5 个 batch，因为它们包含了子进程的启动时间，不代表稳定速度。
-`time.perf_counter()` 是高精度计时器，专门用来测耗时。
-
----
-
-## 8. `scripts/train.ps1`
+## 7. `scripts/train.ps1`
 
 结构和 `robot.ps1` 相同：参数 → 读配置 → 拼参数 → 运行。重点是**每个参数为什么这样设**。
 
@@ -595,7 +533,7 @@ switch ($Policy) {
 - `--policy.xxx`：改策略本身的结构参数（对应 `configuration_diffusion.py` 里的字段）。
   命令行里的列表写成 `[240,320]`，LeRobot 的配置解析器（draccus）会把它转成 Python 的元组。
 - `--ema.xxx`：训练流程的参数，不属于策略。ACT 不用 EMA，所以只在 diffusion 分支里出现。
-- diffusion 分支把 U-Net 通道减半，是为了能在 8 GB 显存上训练；本项目最终的模型是在集群上用默认大小训的（见第 11 节）。
+- diffusion 分支把 U-Net 通道减半，是为了能在 8 GB 显存上训练；本项目最终的模型是在集群上用默认大小训的（见第 10 节）。
 - 为什么这几个参数这样设，见 [05_diffusion_policy.md](05_diffusion_policy.md) 第 5 节。
 
 **smolvla 分支的两个新东西：**
@@ -609,7 +547,7 @@ switch ($Policy) {
 
 ---
 
-## 9. `scripts/lerobot_train_win.py`
+## 8. `scripts/lerobot_train_win.py`
 
 **问题：** LeRobot 每保存一次 checkpoint，会把 `checkpoints/last` 设成指向最新 checkpoint 的**符号链接**。
 Windows 普通用户没有创建符号链接的权限（`WinError 1314`），训练会在第一次保存时崩溃。
@@ -697,7 +635,7 @@ for klass in (PreTrainedPolicy, DataProcessorPipeline):
 
 ---
 
-## 10. LeRobot 内部：我们调用的命令在做什么
+## 9. LeRobot 内部：我们调用的命令在做什么
 
 ### `lerobot-record` 的主循环（`lerobot/scripts/lerobot_record.py`）
 
@@ -747,7 +685,7 @@ for step in range(steps):
 
 日志里的 `data_s` 是等数据的时间，`updt_s` 是 GPU 前向反向的时间（都是两次日志之间的平均值）。
 前 100 步的 `data_s` 会偏大，因为 worker 进程的启动时间（Windows 上每个约 19 秒）也被算进了平均值；
-稳定后每个 batch 只要约 0.06 秒（`bench_dataloader.py` 实测），瓶颈在 GPU。
+稳定后每个 batch 只要约 0.06 秒（torchcodec 解码、4 个进程实测），瓶颈在 GPU。
 
 ### ACT 的 `forward`（`lerobot/policies/act/modeling_act.py`）
 
@@ -767,7 +705,7 @@ loss = L1(预测动作, 真实动作，忽略 action_is_pad 的位置) + 10 × K
 
 ---
 
-## 11. `cloud/slurm/`：在 GPU 集群上训练
+## 10. `cloud/slurm/`：在 GPU 集群上训练
 
 这几个文件是 **bash 脚本**，在 Linux 集群上运行，不在 Windows 上运行。用法见 [cloud/README.md](../cloud/README.md)。
 分工：`setup_env.sh` 装一次环境；`submit.sh` 读个人设置、检查账号、提交；`train.sbatch` 是任务本身。
@@ -863,12 +801,12 @@ srun lerobot-train "${COMMON[@]}" "${PRESET[@]}"
 和 `train.ps1` 一样分成"所有策略共用的参数"和"每个策略的预设"。`( ... )` 是 bash 数组，`"${COMMON[@]}"` 把数组展开成一个个参数。
 集群上的 diffusion 预设和笔记本的唯一区别是**不减半 U-Net 通道数**：V100 有 16 GB 显存，能放下论文默认的 278M 参数。
 smolvla 预设和笔记本的区别是 batch 从 8 提到 32、步数从 3 万降到 2 万，每 5000 步存一次。V100 跑 bf16 很慢（实测 2.47 s/步），2 万步约 14 小时，要分两个 8 小时任务：第一个超时后再提交一次，从最近的 checkpoint 续训，最多损失 5000 步之内的进度。
-`rename_map` 整个参数用单引号包住：bash 里单引号内的 `"` 原样传给程序（PowerShell 5.1 里则要写成 `\"`，见第 8 节）。
+`rename_map` 整个参数用单引号包住：bash 里单引号内的 `"` 原样传给程序（PowerShell 5.1 里则要写成 `\"`，见第 7 节）。
 
 > `.sh` 和 `.sbatch` 必须用 Linux 换行符（LF），否则 bash 会报 `$'\r': command not found`。
 > `.gitattributes` 里的 `*.sh text eol=lf` 保证了这一点。
 
-## 12. `scripts/make_gif.py`
+## 11. `scripts/make_gif.py`
 
 **问题：** README 里要放机器人实际运行的动图。评估录下的视频在数据集里，但 LeRobot 把很多条 episode
 接在**同一个 MP4** 里，每台相机一个文件，不能直接拿来用。
@@ -904,7 +842,7 @@ graph = ";".join(labels) + ";[v0][v1]hstack=inputs=2,split[a][b];[a]palettegen[p
 - 📘 `subprocess.run([...], check=True)`：从 Python 里运行一个外部程序，`check=True` 表示它失败就抛异常。
 - 两个 GIF 各约 3 MB。
 
-## 13. `scripts/plot_results.py`
+## 12. `scripts/plot_results.py`
 
 **问题：** 每个策略评估完都要更新 README 的图。手工画容易和记录表对不上。
 
@@ -919,7 +857,7 @@ ROW = re.compile(r"^\|\s*\d+\s*\|\s*([①②③④⑤])\s*\|\s*(✅|🟡|❌)\s*
 - 直接拼 SVG 文本：SVG 是用 XML 描述图形的文本格式，`<rect>` 是矩形（柱子），`<text>` 是文字。
   GitHub 能直接显示 SVG，所以不需要装 matplotlib。
 
-## 14. `cloud/hf_jobs/train_pi05.py`
+## 13. `cloud/hf_jobs/train_pi05.py`
 
 **问题：** π₀.₅ 有 41 亿个可训练参数，float32 全量微调要约 67 GB 显存，笔记本和集群的 V100 都放不下，只能租 Hugging Face 的 A100。
 
@@ -935,7 +873,7 @@ ROW = re.compile(r"^\|\s*\d+\s*\|\s*([①②③④⑤])\s*\|\s*(✅|🟡|❌)\s*
 f"--rename_map={json.dumps(RENAME)}"
 ```
 
-`rename_map` 是 JSON，PowerShell 5.1 会吃掉其中的引号（第 8 节）。在 Python 里拼好 `sys.argv` 再调用 `lerobot_train.main()`，没有引号问题。
+`rename_map` 是 JSON，PowerShell 5.1 会吃掉其中的引号（第 7 节）。在 Python 里拼好 `sys.argv` 再调用 `lerobot_train.main()`，没有引号问题。
 
 ### 修 Windows 路径
 
@@ -948,7 +886,7 @@ hf_jobs.build_remote_config_file = _fix_windows_paths(hf_jobs.build_remote_confi
 
 LeRobot 把 `--policy.path` 存成 `Path`，Windows 上写进 JSON 变成 `lerobot\pi05_base`。远程是 Linux，读不懂，
 任务一开始就会失败。这里包住生成配置的函数，写完文件后把 `pretrained_path` 和 `output_dir` 里的 `\` 换回 `/`。
-和第 9 节的补丁是同一个问题，只是这次发生在"把配置发给别的机器"这一步。
+和第 8 节的补丁是同一个问题，只是这次发生在"把配置发给别的机器"这一步。
 
 ### `--dry-run`
 
