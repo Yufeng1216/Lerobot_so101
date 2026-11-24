@@ -84,7 +84,8 @@ Success = toy released inside the box. Per-trial sheets are in [`results/`](resu
 ```
 config/          robot.example.json  → copy to robot.json (your COM ports, camera indices, HF user)
 scripts/         runs on the Windows laptop: hardware checks, recording, local training, deployment
-cloud/           runs elsewhere: Slurm GPU-cluster scripts for models that need more than 8 GB
+cloud/           runs elsewhere: Slurm cluster and rented Hugging Face GPUs, for models that need more than 8 GB
+zero_shot/       the no-demonstration baseline: SO-101 kinematics, pixel→table homography, local VLM pointing
 docs/            step-by-step tutorial, one file per stage
 results/         per-trial real-robot evaluation sheets
 assets/          README media (rollout GIFs, results chart)

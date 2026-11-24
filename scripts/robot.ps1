@@ -13,6 +13,7 @@
   .\scripts\robot.ps1 rollout -Policy outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model
   .\scripts\robot.ps1 eval -Policy outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model -Name act
       # 20 recorded trials (docs/08_evaluation.md) -> local dataset <hf_user>/rollout_eval_act
+      # run it again with the same -Name and it appends (e.g. -Episodes 5, alternating policies)
 
   Any extra arguments are passed straight through to the LeRobot command, e.g.
   .\scripts\robot.ps1 record -Name test -Episodes 2 --dataset.episode_time_s=20
@@ -138,6 +139,13 @@ switch ($Command) {
             "--dataset.push_to_hub=false",
             "--display_data=true"
         )
+        # If this eval dataset already exists, append to it. That lets several policies take turns in
+        # blocks (e.g. -Episodes 5 per policy, alternating) so lighting drift hits all of them equally.
+        $lerobotHome = if ($env:HF_LEROBOT_HOME) { $env:HF_LEROBOT_HOME } else { Join-Path $env:HF_HOME "lerobot" }
+        $evalDir = Join-Path $lerobotHome $repoId
+        if (Test-Path (Join-Path $evalDir "meta\info.json")) {
+            $argsList += @("--resume=true", "--dataset.root=$evalDir")
+        }
     }
 }
 

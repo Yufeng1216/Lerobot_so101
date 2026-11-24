@@ -128,14 +128,20 @@ Lerobot/
 │   ├── robot.ps1          读 config/robot.json，拼好标定/遥操作/录制/部署命令
 │   ├── train.ps1          训练入口：每个策略的参数预设
 │   ├── lerobot_train_win.py  Windows 修复版 lerobot-train（见 docs/04_act.md）
-│   └── align_camera.py    相机被碰歪后，对照录制时的画面把它摆回原位
+│   ├── align_camera.py    相机被碰歪后，对照录制时的画面把它摆回原位
+│   ├── make_gif.py        把一次评估试验剪成 README 用的 GIF
+│   └── plot_results.py    从 results/*.md 画各点位成功率图
 ├── cloud/                 在别的机器上训练（笔记本 8 GB 显存放不下的模型）
 │   ├── README.md          使用说明
-│   └── slurm/             Linux GPU 集群（Slurm 排队系统）：装环境、提交训练任务
-│       ├── site.env.example  账号等个人设置的模板（真实的 site.env 不上传）
-│       ├── setup_env.sh   一次性装环境
-│       ├── submit.sh      检查账号后提交任务
-│       └── train.sbatch   训练任务本身
+│   ├── slurm/             Linux GPU 集群（Slurm 排队系统）：装环境、提交训练任务
+│   │   ├── site.env.example  账号等个人设置的模板（真实的 site.env 不上传）
+│   │   ├── setup_env.sh   一次性装环境
+│   │   ├── submit.sh      检查账号后提交任务
+│   │   └── train.sbatch   训练任务本身
+│   └── hf_jobs/train_pi05.py  把 π₀.₅ 训练提交到租用的 Hugging Face GPU
+├── zero_shot/             零样本基线（不用示范）：运动学、单应性标定、本地 VLM 指向
+├── results/               每个策略真机评估的逐次记录表
+├── assets/                README 用的 GIF 和图
 ├── docs/                  中文教程，一个阶段一个文件
 ├── data/                  录好的数据集（不上传 git，HF Hub 上有一份）
 ├── outputs/               运行时产生的东西：截图、训练 checkpoint、日志（不上传）

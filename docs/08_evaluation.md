@@ -7,12 +7,17 @@
 
 与录数据时完全相同：相机位置、快递盒位置（胶带标记）、5 个玩具起始点、光照、任务描述。
 
+**光照固定为晚上、只开台灯、拉上窗帘**——示范数据是在这种条件下录的（晚上 22 点，暖色灯光）。
+白天的自然光偏蓝：下午录的评估画面红/蓝比约 1.30，示范数据是 1.58。颜色变了就是分布偏移，
+而且白天光线随时间变化，不同时间测的策略没法公平比较。
+
 ## 流程
 
-- 5 个起始点 × 每点 4 次 = **20 次试验**
+- 5 个起始点 × 每点 8 次 = **每个策略 40 次试验**（20 次的置信区间太宽，见下面"判定标准"）
 - 每次试验开始前：从臂在起始姿态，玩具放在标记点上，盒子是空的
 - 每次最长 **30 秒**
-- 顺序：①②③④⑤ 循环 4 轮（避免一个点连续测导致的偏差）
+- 顺序：①②③④⑤ 为一组，**几个策略按组轮流**（A 测一组 → B 测一组 → A …），
+  这样光线、玩具磨损这类随时间的变化对每个策略的影响一样
 
 运行（每次试验都录成一条 episode，留作展示视频）：
 
@@ -20,10 +25,12 @@
 .\scripts\robot.ps1 eval -Policy <checkpoint 目录或 Hub 模型> -Name <策略名>
 ```
 
-例如 ACT：
+例如 ACT 和 Diffusion 轮流，每次一组 5 次：
 
 ```powershell
-.\scripts\robot.ps1 eval -Policy outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model -Name act
+.\scripts\robot.ps1 eval -Policy outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model -Name act_night -Episodes 5
+.\scripts\robot.ps1 eval -Policy outputs/train/diffusion_so101_pick_place/pretrained_model_ema -Name diffusion_night -Episodes 5 --policy.noise_scheduler_type=DDIM --policy.num_inference_steps=10
+# 再运行第一条：同名的评估数据集已存在时会自动接着录，不会覆盖
 ```
 
 - 背后是 `lerobot-rollout --strategy.type=episodic`：策略控制从臂做一次试验，然后进入复位阶段，

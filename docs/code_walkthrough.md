@@ -20,6 +20,7 @@ Python / PowerShell 语法在第一次出现时解释（标为 📘）。
 | 5 云端 | [`cloud/hf_jobs/train_pi05.py`](#13-cloudhf_jobstrain_pi05py) | 把 π₀.₅ 训练提交到租用的 HF GPU |
 | 6 评估 | [`make_gif.py`](#11-scriptsmake_gifpy) | 把一次评估试验剪成 README 用的 GIF |
 | 6 评估 | [`plot_results.py`](#12-scriptsplot_resultspy) | 从 `results/*.md` 画各点位成功率柱状图 |
+| 7 零样本 | [`zero_shot/*`](#14-zero_shot零样本基线) | 运动学、单应性标定、VLM 指向（不用示范训练的基线） |
 | 内部 | [LeRobot 内部做了什么](#9-lerobot-内部我们调用的命令在做什么) | 录制循环、数据集、训练循环、ACT 前向 |
 
 ---
@@ -345,6 +346,9 @@ switch ($Command) {
 - 数据集名是 `rollout_eval_<Name>`：LeRobot 规定 rollout 录的数据集名字必须以 `rollout_` 开头，否则直接报错。
 - `-Episodes` 没写时默认 20 而不是 record 的 50：`$PSBoundParameters.ContainsKey("Episodes")` 判断用户有没有显式传这个参数。
 - `--dataset.push_to_hub=false`：评估录像只留在本地。
+- **自动接着录**：同名评估数据集已存在（有 `meta\info.json`）时，自动加 `--resume=true --dataset.root=...`。
+  这样几个策略可以按组轮流（每次 `-Episodes 5`），不用记 `-Resume`。和 `record` 不同：录示范时重名多半是失误，要明确加 `-Resume`；
+  评估时同名就是"同一组实验"。
 
 ### 执行前的两道检查（只针对 record）
 
@@ -902,6 +906,67 @@ LeRobot 把 `--policy.path` 存成 `Path`，Windows 上写进 JSON 变成 `lerob
 | `save_freq` | = steps | 带优化器状态的完整 checkpoint 约 66 GB，只在最后存一次 |
 | `eval_steps` | 0 | 付费 GPU 上不做验证集评估 |
 | `--job.timeout` | 9h | 预计 7.3 小时，留余量；它不包括排队时间 |
+
+---
+
+## 14. `zero_shot/`：零样本基线
+
+设计和结果见 [09_zero_shot_vlm.md](09_zero_shot_vlm.md)。这里讲代码。运行方式都是 `python -m zero_shot.<文件名>`
+（从仓库根目录运行，`-m` 让 Python 把 `zero_shot` 当成一个包，文件之间可以互相 import）。
+
+### `kinematics.py`：正 / 逆运动学
+
+**读 URDF：** URDF 是描述机器人的 XML。每个 `<joint>` 有父连杆、子连杆、`<origin xyz rpy>`（关节在父连杆坐标系里的位置和朝向）
+和 `<axis>`（转轴）。从夹爪尖往回找父连杆，一直找到底座，就得到 6 个关节组成的链。
+
+**正运动学（FK）：** 从底座开始，依次乘上每个关节的"固定偏移 × 绕转轴旋转 q"两个 4×4 矩阵，
+最后得到夹爪尖在底座坐标系里的位置和朝向：
+
+```python
+for j in CHAIN:
+    T = T @ j.origin                      # 固定偏移（来自 URDF 的 xyz / rpy）
+    if j.movable:
+        R[:3, :3] = _axis_angle(j.axis, angles[j.name])   # 绕转轴旋转关节角（罗德里格斯公式）
+        T = T @ R
+```
+
+**逆运动学（IK）：** 给定目标点，反过来求关节角。没有解析公式，就迭代：
+
+```python
+r = residual(q)                 # [位置误差 (m) 3 维, 0.05 × (夹爪朝向 − 竖直向下) 3 维]
+J[:, k] = (residual(q + dq) - r) / 0.01         # 数值雅可比：每个关节动 0.01°，残差变多少
+step = J.T @ solve(J @ J.T + λ² I, -r)          # 阻尼最小二乘（DLS）
+```
+
+- 📘 **雅可比矩阵** J：残差对每个关节角的导数。牛顿法会直接用 J 的逆，但手臂伸直或到了限位附近 J 接近奇异，
+  步子会大得离谱。加 λ²I（阻尼）后步子始终有界，这就是 DLS（也叫 Levenberg–Marquardt）。
+- **λ 的大小和单位有关**：关节转 1°，夹爪尖只动约 3 mm，J 的元素约 3e-3。λ 取 0.05 时 λ² 比 JJᵀ 大几十倍，每步几乎不动；
+  改成 1e-3 后几十次迭代就收敛到 0.1 mm。
+- **为什么只用 4 个关节**：wrist_roll 只让夹爪绕自己的轴转，不改变夹爪尖的位置和朝下的方向，固定不动。
+- **初值很重要**（`solve_grasp`）：从收拢姿态出发，shoulder_lift 正好在 −100° 限位上，第一步就被裁剪回限位，卡死。
+  改用示范里典型的抓取姿态做初值（试 4 个，取误差最小的），shoulder_pan 直接用目标的方位角估计。
+
+### `check_fk.py`：不用机器人验证 FK
+
+找每条示范"夹爪先张开、再合上"的那一帧（`grasp_frame`），算这时的夹爪尖位置。
+桌面抓取的高度应该处处相同，位置应该聚成 5 簇（5 个起始点）。聚类用手写的 k-means（`kmeans`）：
+先用"最远点"选 5 个初始中心，再反复"把点分给最近的中心 → 中心挪到各簇的平均位置"。
+
+### `calibrate_from_demos.py`：单应性矩阵
+
+- `toy_pixel`：把图像转到 HSV 颜色空间，取色相 100–130（蓝色）、饱和度高的像素，开运算去掉噪点，取最大连通块的中心。
+- 📘 **单应性矩阵** H（3×3）：同一个平面在两个视角之间的映射，`[x, y, 1] ∝ H [u, v, 1]`。
+  俯视相机拍的桌面和机械臂坐标系里的桌面是同一个平面，所以一个 H 就能把像素换成桌面坐标，不需要深度。
+- `cv2.findHomography(..., cv2.RANSAC, 0.015)`：RANSAC 反复随机挑 4 组点求 H，保留"误差小于 1.5 cm 的点最多"的那个，
+  抓取检测错了或者颜色识别偏了的点会被当成外点丢掉。
+
+### `pointing.py` 和 `eval_pointing.py`：VLM 指向
+
+- 提示词要求模型只回答 JSON：`[{"point_2d": [x, y], "label": "toy"}]`。`parse_point` 用正则抠出 `[...]` 再 `json.loads`，
+  也兼容模型改答 `bbox_2d`（取框的中心）。
+- Qwen3-VL 的坐标是 **0–1000 的相对值**，`x / 1000 * 宽度` 才是像素。
+- `do_sample=False`：贪心解码，同一张图每次答案相同，评估可复现。
+- `eval_pointing.py` 把 VLM 的点和颜色检测的玩具中心比较，再用 H 换算成桌面上的厘米误差。
 
 ---
 
