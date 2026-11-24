@@ -30,3 +30,7 @@ Thumbs.db
 desktop.ini
 .vscode/
 .idea/
+
+# Personal dev notes and machine-specific cluster setup (local only, backed up with the folder)
+notes/
+cluster/

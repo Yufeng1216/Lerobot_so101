@@ -8,9 +8,9 @@ Optionally saves a contact sheet per episode (6 evenly spaced frames from each c
 to outputs/dataset_check/<dataset>/ so you can eyeball success/failure quickly.
 
 Usage (inside the `lerobot` conda env):
-    python scripts/inspect_dataset.py Yufeng1216/so101_pick_toy
-    python scripts/inspect_dataset.py Yufeng1216/so101_pick_toy --frames      # also save contact sheets
-    python scripts/inspect_dataset.py Yufeng1216/so101_pick_toy --frames --episodes 0 3
+    python scripts/inspect_dataset.py Yufeng1216/so101_pick_place
+    python scripts/inspect_dataset.py Yufeng1216/so101_pick_place --frames      # also save contact sheets
+    python scripts/inspect_dataset.py Yufeng1216/so101_pick_place --frames --episodes 0 3
 """
 
 from __future__ import annotations
@@ -97,7 +97,7 @@ def contact_sheets(root: Path, df: pd.DataFrame, cameras: list[str], episodes: l
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("repo_id", help="e.g. Yufeng1216/so101_pick_toy")
+    parser.add_argument("repo_id", help="e.g. Yufeng1216/so101_pick_place")
     parser.add_argument("--root", type=Path, help="dataset folder (default: $HF_LEROBOT_HOME/<repo_id>)")
     parser.add_argument("--frames", action="store_true", help="save per-episode contact sheets")
     parser.add_argument("--episodes", type=int, nargs="*", help="only these episodes for --frames")

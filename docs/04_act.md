@@ -108,20 +108,11 @@ wrist 图像 ┘
 > 联接只能指向**绝对路径**：如果之后把整个项目文件夹挪到别处，旧 run 里的 `last` 会失效。
 > 这时直接用带编号的目录（如 `checkpoints/050000/pretrained_model`）即可，模型本身不受影响。
 
-实测（RTX 3070 Laptop，batch 8）：200 步约 5 分钟，显存 3.7 GB。
-日志里前 100 步平均 `data_s≈0.97`，看起来像是在等数据，但 `scripts/bench_dataloader.py` 测出
-稳定状态下每个 batch 只要 0.06 秒：那 0.97 秒是 4 个数据加载进程的**启动时间**（Windows 上每个约 19 秒）
-摊到前 100 步的结果。
+实测（RTX 3070 Laptop，batch 8）：显存 3.7 GB，稳定后每步 0.28 秒（GPU 是瓶颈，数据加载不是）。
+混合精度（`--policy.use_amp=true`）没有加速，所以用默认 fp32。
 
-400 步对比（第 200–400 步的稳定值）：
-
-| | fp32（默认） | AMP（`--policy.use_amp=true`） |
-|---|---|---|
-| `updt_s`（GPU 每步） | **0.278 s** | 0.283–0.294 s |
-| `data_s`（等数据） | 0.003 s | 0.003 s |
-| 显存 | 3.73 GB | 3.73 GB |
-
-AMP 没有加速，所以用默认 fp32。50,000 步 × 0.28 s ≈ **4 小时**（加上每 2000 步的验证，约 4.5 小时）。
+> 前 100 步的日志里 `data_s` 会很大（约 1 秒），这是 Windows 上数据加载进程的**启动时间**（每个约 19 秒）
+> 被摊进了平均值，不是真的慢。看速度要看稳定之后的值。
 
 ## 6.5 训练前准备（笔记本）
 
@@ -183,14 +174,13 @@ outputs/train/act_so101_pick_place/
 - 但验证 loss 持平**不代表**后面的训练没用：训练 loss 还在降，动作可能变得更精细，
   而这只有在真机闭环里才看得出来。所以真机评估时会对比 10k / 30k / 50k 三个 checkpoint。
 
-> **上传失败的坑：** 训练结束时自动上传到 Hub 报了 `401 Unauthorized`。原因是本机的 HF 登录过期了，
-> 训练本身不受影响，模型完整保存在本地。重新运行 `hf auth login` 后，用下面的命令手动上传：
+> 如果训练结束时上传失败（比如 HF 登录过期，报 `401`），模型仍完整保存在本地，重新登录后手动上传即可：
 >
 > ```powershell
 > hf upload Yufeng1216/act_so101_pick_place outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model .
 > ```
 >
-> 教训：长时间训练之前先运行 `hf auth whoami`，确认还登录着。
+> 长时间训练前先运行 `hf auth whoami` 确认登录状态。
 
 中断了可以接着训：
 

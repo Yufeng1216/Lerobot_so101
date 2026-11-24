@@ -28,7 +28,7 @@ the same protocol (see [docs/08_evaluation.md](docs/08_evaluation.md)).
 |---|---|---|---|---|---|
 | ACT | 50k (≈27 epochs) | 4.0 h (RTX 3070 Laptop) | – | [act_so101_pick_place](https://huggingface.co/Yufeng1216/act_so101_pick_place) | – |
 | Diffusion Policy (89 M, laptop) | – | – | – | – | – |
-| Diffusion Policy (278 M default, Slurm cluster cluster) | – | – | – | – | – |
+| Diffusion Policy (278 M default, larger GPU) | – | – | – | – | – |
 | SmolVLA | – | – | – | – | – |
 | π₀.₅ | – | – | – | – | – |
 | Zero-shot VLM + IK | 0 (no demos) | – | – | – | – |

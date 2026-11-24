@@ -17,7 +17,6 @@ Python / PowerShell 语法在第一次出现时解释（标为 📘）。
 | 4 训练 | [`bench_dataloader.py`](#7-scriptsbench_dataloaderpy) | 找出最快的数据加载设置 |
 | 4 训练 | [`train.ps1`](#8-scriptstrainps1) | 训练入口和每个策略的参数预设 |
 | 4 训练 | [`lerobot_train_win.py`](#9-scriptslerobot_train_winpy) | 修复 Windows 上的 checkpoint 链接问题 |
-| 5 集群 | [`cluster/*`](#11-clustercluster集群训练) | 在 Slurm cluster 上装环境、提交大模型训练 |
 | 内部 | [LeRobot 内部做了什么](#10-lerobot-内部我们调用的命令在做什么) | 录制循环、数据集、训练循环、ACT 前向 |
 
 ---
@@ -665,10 +664,8 @@ for step in range(steps):
 ```
 
 日志里的 `data_s` 是等数据的时间，`updt_s` 是 GPU 前向反向的时间（都是两次日志之间的平均值）。
-冒烟测试第 100 步时 `data_s≈0.97`、`updt_s≈0.42`，我们一开始据此判断"瓶颈在数据加载"。
-但 `bench_dataloader.py` 测出稳定状态下每个 batch 只要 0.06 秒：那 0.97 秒其实是
-**4 个 worker 进程的启动时间（每个约 19 秒）被摊到了前 100 步里**。所以真正的瓶颈是 GPU。
-教训：**看性能数据要区分"启动开销"和"稳定状态"**，只看前 100 步的平均值会被误导。
+前 100 步的 `data_s` 会偏大，因为 worker 进程的启动时间（Windows 上每个约 19 秒）也被算进了平均值；
+稳定后每个 batch 只要约 0.06 秒（`bench_dataloader.py` 实测），瓶颈在 GPU。
 
 ### ACT 的 `forward`（`lerobot/policies/act/modeling_act.py`）
 
@@ -685,79 +682,6 @@ loss = L1(预测动作, 真实动作，忽略 action_is_pad 的位置) + 10 × K
 ```
 
 日志里的 `l1_loss` 和 `kld_loss` 就是这两项。
-
----
-
-## 11. `cluster/`：集群训练
-
-这两个文件是 **bash 脚本**（Linux 的 shell 语言），在集群上运行，不在 Windows 上运行。
-用法见 [05_diffusion_policy.md](05_diffusion_policy.md) 第 6.5 节。
-
-### `setup_env.sh`：一次性装环境
-
-```bash
-set -euo pipefail
-```
-
-bash 脚本的"安全模式"：`-e` 任何一条命令失败就停止；`-u` 用到未定义的变量就报错；
-`-o pipefail` 管道里任何一段失败都算失败。没有这一行，前面装失败了脚本还会继续往下跑。
-
-```bash
-if [ ! -x "$CONDA_DIR/bin/conda" ]; then ... fi
-```
-
-如果 `~/miniforge3/bin/conda` 不存在（`!` 取反，`-x` 表示"存在且可执行"），就下载安装 Miniforge。
-所以这个脚本**可以重复运行**：装过的步骤会跳过。下面的 `conda env list | grep -q` 也是同样的思路。
-
-装的东西和笔记本上一一对应：Python 3.12、conda-forge 的 ffmpeg 7.1.1、`lerobot==0.7.0`。
-版本对齐，两边训练出的结果才能比较。
-
-### `train_diffusion_full.sbatch`：训练任务
-
-```bash
-#SBATCH --account=CHANGE_ME
-#SBATCH --partition=gpu
-#SBATCH --gpus=1
-#SBATCH --time=12:00:00
-#SBATCH --output=logs/%x_%j.log
-```
-
-对 bash 来说这些是注释；对 `sbatch` 来说这是**资源申请**：用哪个账号计费、哪个分区（哪类 GPU）、
-几块 GPU、最长跑多久、日志写到哪（`%x` = 任务名，`%j` = 任务编号）。
-
-```bash
-case "${SLURM_JOB_ACCOUNT:-}" in
-    *othercourse*) echo "ERROR: ..." >&2; exit 1 ;;
-esac
-```
-
-安全检查。Slurm 运行任务时会把计费账号名放进环境变量 `SLURM_JOB_ACCOUNT`。`case ... in *othercourse*)` 是 bash 的
-模式匹配：账号名里只要含 `othercourse` 就打印错误并退出（`>&2` 表示写到错误输出）。
-因为两个课程账号里只有 course 允许用于本项目，万一填错，任务会在开始训练前就停下。
-`${SLURM_JOB_ACCOUNT:-}` 的 `:-` 表示变量不存在时当作空字符串，避免 `set -u` 报错。
-
-```bash
-export HF_LEROBOT_HOME="$PWD/data"
-```
-
-和 Windows 上 `env.ps1` 的作用一样：让数据集下载到项目目录里。第一次运行时，
-`lerobot-train` 发现本地没有 `Yufeng1216/so101_pick_place`，会自动从 Hub 下载（数据集是公开的，不需要登录）。
-
-```bash
-if [ -d "outputs/train/$RUN/checkpoints/last" ]; then
-    srun lerobot-train --config_path=... --resume=true
-    exit
-fi
-```
-
-集群任务有时间上限。如果超时被停掉，**原样再提交一次**，这里检测到已有 checkpoint，就接着训，
-和 `train.ps1 -Resume` 一样。`srun` 让命令在 Slurm 分配到的资源上运行。
-
-最后的 `lerobot-train` 参数和 `train.ps1` 的 diffusion 预设**逐项相同**，只是**没有** `--policy.down_dims`
-（于是用默认的 512/1024/2048），这样两次训练只差模型容量一个变量。行尾的 `\` 表示"命令没写完，下一行接着"。
-
-> 这两个文件必须用 Linux 的换行符（LF）。Windows 的换行符（CRLF）会让 bash 报
-> `$'\r': command not found`。`.gitattributes` 里的 `*.sh text eol=lf` 保证了这一点。
 
 ---
 

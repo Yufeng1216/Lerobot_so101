@@ -111,15 +111,9 @@ git push -u origin main
 
 `rebase` 的意思是：把我本地的提交挪到远程最新提交的后面，历史保持一条直线，不会覆盖远程的任何东西。
 
-### 登录 GitHub 的坑
+### 登录 GitHub
 
 - Windows 版 Git 自带 **Git Credential Manager (GCM)**：第一次 `git push` 时会打开浏览器授权，
-  授权后跳到一个 `127.0.0.1:xxxx/?code=...` 的**空白页，这是正常的**，表示授权已完成，关掉即可。
-- GCM 的登录和 `gh`（GitHub CLI）的登录是**两套独立的系统**：`gh auth status` 显示未登录，不代表 `git push` 不行。
-  查看 GCM 存了哪些账号：`git credential-manager github list`。
-- **账号改过名**：GCM 里记的是改名前的用户名（本项目是 `Yufeng1216` → `Yufeng1216`）。
-  如果远程地址写成 `https://Yufeng1216@github.com/...`，GCM 会以为是另一个账号，要求重新登录。
-  解决：远程地址里**不要带用户名**，用 `https://github.com/Yufeng1216/Lerobot_so101.git`。
-- "Repository not found" 在私有仓库上有两种可能：仓库还没建，或者当前凭据的账号没有权限看到它。
-- 电脑上可能有两个 `gh`（官方 GitHub CLI 和一个同名的 npm 包）。要用官方版本时写全路径：
-  `& "C:\Program Files\GitHub CLI\gh.exe" auth login`。
+  授权后跳到一个 `127.0.0.1:xxxx/?code=...` 的**空白页，这是正常的**，关掉即可。
+- 远程地址里**不要带用户名**（写成 `https://github.com/<用户>/<仓库>.git`），否则 GCM 可能要求重复登录。
+- 私有仓库报 "Repository not found"：要么仓库还没建，要么当前登录的账号没有权限。

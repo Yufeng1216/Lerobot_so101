@@ -85,7 +85,7 @@
 **Spatial Softmax** 把 ResNet 的特征图变成 32 个"关键点"的 (x, y) 坐标：对每个通道做 softmax 得到
 一张概率图，再求坐标的期望。输出是"东西在哪里"，而不是"东西长什么样"，正适合操作任务。
 
-U-Net 的通道数 `down_dims = (512, 1024, 2048)` 让参数量达到约 2.6 亿，其中大部分在 U-Net 里。
+默认的 U-Net 通道数 `down_dims = (512, 1024, 2048)` 让参数量达到约 2.8 亿，其中大部分在 U-Net 里。
 
 ## 5. 本项目的训练配置
 
@@ -97,7 +97,8 @@ U-Net 的通道数 `down_dims = (512, 1024, 2048)` 让参数量达到约 2.6 亿
 | `crop_ratio` | **0.95** | 训练时随机裁出 95% 的区域（推理时裁中心）。这是论文里的**数据增强**，让模型对相机的轻微偏移更鲁棒 |
 | `ema.type` | **warmup** | 保存一份权重的**指数滑动平均**（EMA）。扩散模型的标准做法，EMA 权重生成的动作更平滑稳定 |
 | `optimizer_lr` | 1e-4，余弦退火，500 步预热（默认） | 论文值 |
-| `batch_size` | 8 | 和 ACT 一样（显存实测见下） |
+| `down_dims` | **[256, 512, 1024]** | 默认值的一半。默认的 278M 参数在 8 GB 显存里放不下（见第 6 节），减半后 89M |
+| `batch_size` | 8 | 和 ACT 一样 |
 | `steps` | 100,000 | 扩散模型要学整个分布，比回归难，通常需要更多步；约 53 个 epoch |
 | `save_freq` | 20,000 | 5 个 checkpoint |
 
@@ -114,84 +115,31 @@ U-Net 的通道数 `down_dims = (512, 1024, 2048)` 让参数量达到约 2.6 亿
 
 | 配置 | 参数量 | 显存 | 每步 |
 |---|---|---|---|
-| 默认 U-Net `down_dims=(512,1024,2048)` | 278M | **> 8 GB，溢出** | **约 124 s**（不可用） |
-| 本项目 `down_dims=(256,512,1024)` | 89M | 2.9 GB | **0.13 s** |
+| 默认 U-Net `down_dims=(512,1024,2048)` | 278M | 超过 8 GB | 约 124 s（不可用） |
+| 本项目 `down_dims=(256,512,1024)` | 89M | 2.9 GB | 0.13 s |
 
-> **踩坑：显存溢出不会报错，只会变得极慢。** 默认配置下，光是 fp32 的权重、梯度、Adam 的两份状态
-> 和 EMA 副本就约 278M × 4 字节 × 5 ≈ 5.5 GB，再加上激活值就超过了 8 GB。
-> Windows 的显卡驱动不会报 `CUDA out of memory`，而是悄悄把放不下的部分挪到**系统内存**（"共享 GPU 内存"），
-> 每一步都要通过 PCIe 来回搬数据，速度慢了约 1000 倍。
-> 判断方法：`nvidia-smi` 显示显存几乎占满，同时 `updt_s` 异常大。
->
-> 解决：把 U-Net 通道数减半，参数量变成原来的约 1/3。
-> 这组通道数论文里也用过；50 条示范的数据量下，89M 参数（仍是 ACT 的 1.7 倍）已经足够。
-> 图像编码器（ResNet18 + Spatial Softmax）没有改动。
-> 如果真机效果不理想，可以在云端用默认大小再训一次做对照（模型容量消融）。
+> **显存不够时，Windows 不一定报 `CUDA out of memory`**：驱动会把放不下的部分挪到系统内存，
+> 训练不报错，但慢上百倍。如果 `nvidia-smi` 显示显存几乎占满、日志里 `updt_s` 异常大，就是这个原因。
 
-所以第 5 节的配置表里还要加一行：
-
-| 参数 | 值 | 为什么 |
-|---|---|---|
-| `down_dims` | **[256, 512, 1024]** | 默认值在 8 GB 显存下溢出，见上 |
-
+默认 U-Net 光是 fp32 的权重、梯度、Adam 状态和 EMA 副本就约 5.5 GB，所以笔记本上把通道数减半。
+这组通道数论文里也用过；图像编码器（ResNet18 + Spatial Softmax）不变。
 100,000 步 × 0.13 s ≈ **3.6 小时**（加上验证约 4 小时）。
 
-## 6.5 对照实验：在 Slurm cluster 集群上训练默认大小（278M）
+### 对照实验：默认大小（278M）
 
-减半是被显存逼的，不能想当然地认为"小模型就够了"。过拟合可以靠正则化控制：
-本配置里已经有随机裁剪、EMA、weight decay 和验证集监控。所以我们在 university 的 **Slurm cluster**
-集群上用**默认的 U-Net**（278M）再训一次，其余设置和笔记本上完全一样。两次的结果放在一起，
-就是一个**模型容量消融实验**：
+为了确认减半有没有损失模型能力，默认大小的版本在一台更大显存的 GPU（大学的 Slurm 集群）上用**完全相同的其余设置**
+再训一次，两者构成模型容量的对照：
 
-| 训练 | `down_dims` | 参数量 | 硬件 |
-|---|---|---|---|
-| 笔记本 | 256 / 512 / 1024 | 89M | RTX 3070 Laptop 8 GB |
-| 集群 | 512 / 1024 / 2048（默认） | 278M | V100 16 GB 或 A40 48 GB |
+| 训练 | `down_dims` | 参数量 |
+|---|---|---|
+| 笔记本 | 256 / 512 / 1024 | 89M |
+| 大显存 GPU | 512 / 1024 / 2048（默认） | 278M |
 
-### 集群是什么，和笔记本有什么不同
-
-- **登录节点**（login node）：SSH 登录后所在的机器。只用来编辑文件、装环境、提交任务，**没有 GPU，不能在上面训练**。
-- **Slurm**：集群的排队系统。你把"要几块 GPU、多少内存、跑多久、运行什么命令"写进一个 `.sbatch` 文件，
-  用 `sbatch` 提交，Slurm 分到资源后在**计算节点**上运行它。你可以断开 SSH，任务照样跑。
-- `.sbatch` 文件就是一个 bash 脚本。开头的 `#SBATCH ...` 行看起来是注释，但 Slurm 会把它们读成资源申请。
-- 集群是 Linux，所以不需要 Windows 的目录联接补丁，直接用 `lerobot-train`。
-
-### 步骤（登录和两步验证只能你自己做）
-
-```bash
-# 1) 在笔记本上，把集群脚本传上去（-xfer 是专门用来传文件的节点）
-scp -r cluster <uniqname>@cluster-host:~/Lerobot/
-
-# 2) 登录（需要密码 + Duo 两步验证）
-ssh <uniqname>@cluster-host
-cd ~/Lerobot
-
-# 3) 一次性装环境，约 15 分钟
-bash cluster/setup_env.sh
-
-# 4) 查看自己有哪些计费账号，把名字填进 sbatch 文件的 --account=
-#    只能用 course 的账号；other course 的课程资源明确不允许用于本项目
-#    （脚本里有检查：账号名含 othercourse 会直接退出）
-my_accounts
-nano cluster/train_diffusion_full.sbatch
-
-# 5) 提交
-mkdir -p logs                        # Slurm 不会自动创建日志目录
-sbatch cluster/train_diffusion_full.sbatch
-squeue -u $USER                      # PD = 排队中，R = 运行中
-tail -f logs/diffusion_full_*.log    # 看训练日志，Ctrl+C 退出查看（不会停止训练）
-```
-
-- 任务最长 12 小时。超时被停掉的话，**原样再提交一次**，脚本会发现已有 checkpoint，自动接着训。
-- 训练完把模型拷回笔记本（在笔记本上运行）：
-
-```bash
-scp -r <uniqname>@cluster-host:~/Lerobot/outputs/train/diffusion_full_so101_pick_place/checkpoints/last/pretrained_model_ema outputs/train/diffusion_full_so101_pick_place/
-```
+在 Linux 上直接用 `lerobot-train`，参数和 `train.ps1` 的 diffusion 预设相同，只去掉 `--policy.down_dims`。
 
 ## 7. 正式训练
 
-开始之前先确认 HF 登录没过期（ACT 就在这里吃过亏）：
+开始之前先确认 HF 登录没过期，否则训练结束时模型上传会失败：
 
 ```powershell
 hf auth whoami
