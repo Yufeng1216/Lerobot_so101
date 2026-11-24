@@ -27,7 +27,8 @@ the same protocol (see [docs/08_evaluation.md](docs/08_evaluation.md)).
 | Policy | Train steps | Train time | Success rate (n=20) | Model | Rollout video |
 |---|---|---|---|---|---|
 | ACT | 50k (≈27 epochs) | 4.0 h (RTX 3070 Laptop) | – | [act_so101_pick_place](https://huggingface.co/Yufeng1216/act_so101_pick_place) | – |
-| Diffusion Policy | – | – | – | – | – |
+| Diffusion Policy (89 M, laptop) | – | – | – | – | – |
+| Diffusion Policy (278 M default, Slurm cluster cluster) | – | – | – | – | – |
 | SmolVLA | – | – | – | – | – |
 | π₀.₅ | – | – | – | – | – |
 | Zero-shot VLM + IK | 0 (no demos) | – | – | – | – |

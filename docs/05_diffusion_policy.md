@@ -136,6 +136,57 @@ U-Net 的通道数 `down_dims = (512, 1024, 2048)` 让参数量达到约 2.6 亿
 
 100,000 步 × 0.13 s ≈ **3.6 小时**（加上验证约 4 小时）。
 
+## 6.5 对照实验：在 Slurm cluster 集群上训练默认大小（278M）
+
+减半是被显存逼的，不能想当然地认为"小模型就够了"。过拟合可以靠正则化控制：
+本配置里已经有随机裁剪、EMA、weight decay 和验证集监控。所以我们在 university 的 **Slurm cluster**
+集群上用**默认的 U-Net**（278M）再训一次，其余设置和笔记本上完全一样。两次的结果放在一起，
+就是一个**模型容量消融实验**：
+
+| 训练 | `down_dims` | 参数量 | 硬件 |
+|---|---|---|---|
+| 笔记本 | 256 / 512 / 1024 | 89M | RTX 3070 Laptop 8 GB |
+| 集群 | 512 / 1024 / 2048（默认） | 278M | V100 16 GB 或 A40 48 GB |
+
+### 集群是什么，和笔记本有什么不同
+
+- **登录节点**（login node）：SSH 登录后所在的机器。只用来编辑文件、装环境、提交任务，**没有 GPU，不能在上面训练**。
+- **Slurm**：集群的排队系统。你把"要几块 GPU、多少内存、跑多久、运行什么命令"写进一个 `.sbatch` 文件，
+  用 `sbatch` 提交，Slurm 分到资源后在**计算节点**上运行它。你可以断开 SSH，任务照样跑。
+- `.sbatch` 文件就是一个 bash 脚本。开头的 `#SBATCH ...` 行看起来是注释，但 Slurm 会把它们读成资源申请。
+- 集群是 Linux，所以不需要 Windows 的目录联接补丁，直接用 `lerobot-train`。
+
+### 步骤（登录和两步验证只能你自己做）
+
+```bash
+# 1) 在笔记本上，把集群脚本传上去（-xfer 是专门用来传文件的节点）
+scp -r cluster <uniqname>@cluster-host:~/Lerobot/
+
+# 2) 登录（需要密码 + Duo 两步验证）
+ssh <uniqname>@cluster-host
+cd ~/Lerobot
+
+# 3) 一次性装环境，约 15 分钟
+bash cluster/setup_env.sh
+
+# 4) 查看自己有哪些计费账号，把名字填进 sbatch 文件的 --account=
+my_accounts
+nano cluster/train_diffusion_full.sbatch
+
+# 5) 提交
+mkdir -p logs                        # Slurm 不会自动创建日志目录
+sbatch cluster/train_diffusion_full.sbatch
+squeue -u $USER                      # PD = 排队中，R = 运行中
+tail -f logs/diffusion_full_*.log    # 看训练日志，Ctrl+C 退出查看（不会停止训练）
+```
+
+- 任务最长 12 小时。超时被停掉的话，**原样再提交一次**，脚本会发现已有 checkpoint，自动接着训。
+- 训练完把模型拷回笔记本（在笔记本上运行）：
+
+```bash
+scp -r <uniqname>@cluster-host:~/Lerobot/outputs/train/diffusion_full_so101_pick_place/checkpoints/last/pretrained_model_ema outputs/train/diffusion_full_so101_pick_place/
+```
+
 ## 7. 正式训练
 
 开始之前先确认 HF 登录没过期（ACT 就在这里吃过亏）：

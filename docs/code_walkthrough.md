@@ -17,6 +17,7 @@ Python / PowerShell 语法在第一次出现时解释（标为 📘）。
 | 4 训练 | [`bench_dataloader.py`](#7-scriptsbench_dataloaderpy) | 找出最快的数据加载设置 |
 | 4 训练 | [`train.ps1`](#8-scriptstrainps1) | 训练入口和每个策略的参数预设 |
 | 4 训练 | [`lerobot_train_win.py`](#9-scriptslerobot_train_winpy) | 修复 Windows 上的 checkpoint 链接问题 |
+| 5 集群 | [`cluster/*`](#11-clustercluster集群训练) | 在 Slurm cluster 上装环境、提交大模型训练 |
 | 内部 | [LeRobot 内部做了什么](#10-lerobot-内部我们调用的命令在做什么) | 录制循环、数据集、训练循环、ACT 前向 |
 
 ---
@@ -684,6 +685,68 @@ loss = L1(预测动作, 真实动作，忽略 action_is_pad 的位置) + 10 × K
 ```
 
 日志里的 `l1_loss` 和 `kld_loss` 就是这两项。
+
+---
+
+## 11. `cluster/`：集群训练
+
+这两个文件是 **bash 脚本**（Linux 的 shell 语言），在集群上运行，不在 Windows 上运行。
+用法见 [05_diffusion_policy.md](05_diffusion_policy.md) 第 6.5 节。
+
+### `setup_env.sh`：一次性装环境
+
+```bash
+set -euo pipefail
+```
+
+bash 脚本的"安全模式"：`-e` 任何一条命令失败就停止；`-u` 用到未定义的变量就报错；
+`-o pipefail` 管道里任何一段失败都算失败。没有这一行，前面装失败了脚本还会继续往下跑。
+
+```bash
+if [ ! -x "$CONDA_DIR/bin/conda" ]; then ... fi
+```
+
+如果 `~/miniforge3/bin/conda` 不存在（`!` 取反，`-x` 表示"存在且可执行"），就下载安装 Miniforge。
+所以这个脚本**可以重复运行**：装过的步骤会跳过。下面的 `conda env list | grep -q` 也是同样的思路。
+
+装的东西和笔记本上一一对应：Python 3.12、conda-forge 的 ffmpeg 7.1.1、`lerobot==0.7.0`。
+版本对齐，两边训练出的结果才能比较。
+
+### `train_diffusion_full.sbatch`：训练任务
+
+```bash
+#SBATCH --account=CHANGE_ME
+#SBATCH --partition=gpu
+#SBATCH --gpus=1
+#SBATCH --time=12:00:00
+#SBATCH --output=logs/%x_%j.log
+```
+
+对 bash 来说这些是注释；对 `sbatch` 来说这是**资源申请**：用哪个账号计费、哪个分区（哪类 GPU）、
+几块 GPU、最长跑多久、日志写到哪（`%x` = 任务名，`%j` = 任务编号）。
+
+```bash
+export HF_LEROBOT_HOME="$PWD/data"
+```
+
+和 Windows 上 `env.ps1` 的作用一样：让数据集下载到项目目录里。第一次运行时，
+`lerobot-train` 发现本地没有 `Yufeng1216/so101_pick_place`，会自动从 Hub 下载（数据集是公开的，不需要登录）。
+
+```bash
+if [ -d "outputs/train/$RUN/checkpoints/last" ]; then
+    srun lerobot-train --config_path=... --resume=true
+    exit
+fi
+```
+
+集群任务有时间上限。如果超时被停掉，**原样再提交一次**，这里检测到已有 checkpoint，就接着训，
+和 `train.ps1 -Resume` 一样。`srun` 让命令在 Slurm 分配到的资源上运行。
+
+最后的 `lerobot-train` 参数和 `train.ps1` 的 diffusion 预设**逐项相同**，只是**没有** `--policy.down_dims`
+（于是用默认的 512/1024/2048），这样两次训练只差模型容量一个变量。行尾的 `\` 表示"命令没写完，下一行接着"。
+
+> 这两个文件必须用 Linux 的换行符（LF）。Windows 的换行符（CRLF）会让 bash 报
+> `$'\r': command not found`。`.gitattributes` 里的 `*.sh text eol=lf` 保证了这一点。
 
 ---
 
