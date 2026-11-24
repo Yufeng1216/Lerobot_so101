@@ -55,3 +55,14 @@
 | 20 | ⑤ | | | |
 
 汇总：成功率、各点位成功率、平均用时、主要失败模式。
+
+## 评估完：出 GIF 和图
+
+```powershell
+# 挑一次成功的试验做 GIF（--episode 从 0 开始，记录表第 19 次就是 18）
+python scripts/make_gif.py --repo-id Yufeng1216/rollout_eval_act --episode 18 --out assets/act_success.gif
+# 从 results/*.md 重新画各点位成功率
+python scripts/plot_results.py
+```
+
+两个脚本的代码讲解见 [code_walkthrough.md](code_walkthrough.md#12-scriptsmake_gifpy)。

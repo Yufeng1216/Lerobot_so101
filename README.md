@@ -9,28 +9,47 @@ and comparing them against a **zero-shot baseline** that uses no demonstrations 
 **Task:** pick up a plush toy from one of 5 marked spots and place it in a cardboard box.
 **Dataset:** 50 teleoperated demonstrations, [`Yufeng1216/so101_pick_place`](https://huggingface.co/datasets/Yufeng1216/so101_pick_place).
 
+| ACT (spot 4, 50% overall) | Diffusion Policy (spot 5, 75% overall) |
+|---|---|
+| ![ACT rollout](assets/act_success.gif) | ![Diffusion Policy rollout](assets/diffusion_success.gif) |
+
+<sub>Autonomous rollouts recorded during evaluation, 2× speed. Left of each clip: overhead camera; right: wrist camera.</sub>
+
 > 中文教程见 [`docs/`](docs/)（所有教程用中文写成，命令可直接复制运行）。
 
 | Policy | Paper | Params | Type | Trained on |
 |---|---|---|---|---|
 | **ACT** | [Zhao et al., 2023](https://arxiv.org/abs/2304.13705) | ~52 M | CVAE + Transformer, action chunking | local RTX 3070 (8 GB) |
 | **Diffusion Policy** | [Chi et al., 2023](https://arxiv.org/abs/2303.04137) | ~278 M | DDPM/DDIM denoising over action chunks | university GPU cluster (Slurm) |
-| **SmolVLA** | [Shukor et al., 2025](https://arxiv.org/abs/2506.01844) | ~450 M | small VLM + flow-matching action expert | local / cloud GPU |
+| **SmolVLA** | [Shukor et al., 2025](https://arxiv.org/abs/2506.01844) | ~450 M | small VLM + flow-matching action expert | university GPU cluster (Slurm) |
 | **π₀.₅** | [Physical Intelligence, 2025](https://arxiv.org/abs/2504.16054) | ~3 B | VLA, PaliGemma + flow-matching expert | cloud GPU (≥ 24 GB) |
 | **Zero-shot VLM + IK** (baseline) | — | ~2 B (VLM) | Qwen3-VL points at toy/box → table homography → IK → scripted grasp | no training |
 
 ## Results
 
-_Filled in as each stage is completed._ Every policy is evaluated on the same task with
-the same protocol (see [docs/08_evaluation.md](docs/08_evaluation.md)).
+Every policy is evaluated on the real robot with the same protocol
+([docs/08_evaluation.md](docs/08_evaluation.md)): 5 start spots × 4 trials, 30 s each, spots in rotation.
+Success = toy released inside the box. Per-trial sheets are in [`results/`](results/).
 
-| Policy | Train steps | Train time | Success rate (n=20) | Model | Rollout video |
-|---|---|---|---|---|---|
-| ACT | 50k (≈27 epochs) | 4.0 h (RTX 3070 Laptop) | **50%** (10/20; [details](results/act.md)) | [act_so101_pick_place](https://huggingface.co/Yufeng1216/act_so101_pick_place) | – |
-| Diffusion Policy | 100k (≈53 epochs) | ≈4 h (Tesla V100 16 GB) | **75%** (15/20; [details](results/diffusion.md)) | [diffusion_so101_pick_place](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) | – |
-| SmolVLA | – | – | – | – | – |
-| π₀.₅ | – | – | – | – | – |
-| Zero-shot VLM + IK | 0 (no demos) | – | – | – | – |
+| Policy | Train steps | Train time | Success (n=20) | Grasped, not placed | Not grasped | Inference / chunk | Model | Clip |
+|---|---|---|---|---|---|---|---|---|
+| ACT | 50k (≈27 epochs) | 4.0 h, RTX 3070 Laptop | **50%** ([sheet](results/act.md)) | 2 | 8 | ~47 ms | [🤗](https://huggingface.co/Yufeng1216/act_so101_pick_place) | [gif](assets/act_success.gif) |
+| Diffusion Policy | 100k (≈53 epochs) | ≈4 h, Tesla V100 16 GB | **75%** ([sheet](results/diffusion.md)) | 1 | 4 | ~200 ms (DDIM, 10 steps) | [🤗](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) | [gif](assets/diffusion_success.gif) |
+| SmolVLA | 20k, batch 32 | training | – | – | – | – | – | – |
+| π₀.₅ | – | – | – | – | – | – | – | – |
+| Zero-shot VLM + IK | 0 (no demos) | – | – | – | – | – | – | – |
+
+![Per-spot success rate](assets/results.svg)
+
+**Observations so far**
+
+- **Diffusion Policy beats ACT by 25 points** on the same 50 demonstrations. The gap is in grasping:
+  ACT fails to pick up the toy 8/20 times, Diffusion 4/20. Once grasped, both almost always place it.
+- **Spot ⑤ is hard for both** (1/4 each), while Diffusion is 14/16 on spots ①–④. Two very different
+  models failing at the same spot points at the data or the geometry of that spot, not the architecture.
+- **Sampler matters for Diffusion.** The default 100-step DDPM takes ~1.5 s per action chunk on the laptop GPU,
+  longer than the 1.07 s the chunk lasts, so the arm would stall; 10-step DDIM is ~10× faster with the same
+  offline action error ([docs/05](docs/05_diffusion_policy.md#8-在真机上运行)).
 
 ## Hardware
 
@@ -52,6 +71,8 @@ config/          robot.example.json  → copy to robot.json (your COM ports, cam
 scripts/         runs on the Windows laptop: hardware checks, recording, local training, deployment
 cloud/           runs elsewhere: Slurm GPU-cluster scripts for models that need more than 8 GB
 docs/            step-by-step tutorial, one file per stage
+results/         per-trial real-robot evaluation sheets
+assets/          README media (rollout GIFs, results chart)
 ```
 
 ## Tutorial

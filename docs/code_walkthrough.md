@@ -18,6 +18,8 @@ Python / PowerShell 语法在第一次出现时解释（标为 📘）。
 | 4 训练 | [`train.ps1`](#8-scriptstrainps1) | 训练入口和每个策略的参数预设 |
 | 4 训练 | [`lerobot_train_win.py`](#9-scriptslerobot_train_winpy) | 修复 Windows 上的 checkpoint 链接问题 |
 | 5 云端 | [`cloud/slurm/*`](#11-cloudslurm在-gpu-集群上训练) | 在 Linux GPU 集群上装环境、提交训练任务 |
+| 6 评估 | [`make_gif.py`](#12-scriptsmake_gifpy) | 把一次评估试验剪成 README 用的 GIF |
+| 6 评估 | [`plot_results.py`](#13-scriptsplot_resultspy) | 从 `results/*.md` 画各点位成功率柱状图 |
 | 内部 | [LeRobot 内部做了什么](#10-lerobot-内部我们调用的命令在做什么) | 录制循环、数据集、训练循环、ACT 前向 |
 
 ---
@@ -220,6 +222,7 @@ COM4 的变化合计 4545，COM3 是 0，所以 COM4 是主臂。
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $env:HF_LEROBOT_HOME = Join-Path $repoRoot "data"
 $env:HF_LEROBOT_CALIBRATION = Join-Path $repoRoot "config\calibration"
+$env:PYTHONUTF8 = "1"
 $env:HF_HUB_DISABLE_SYMLINKS_WARNING = "1"
 ```
 
@@ -236,6 +239,11 @@ HF_LEROBOT_CALIBRATION = Path(os.getenv("HF_LEROBOT_CALIBRATION", HF_LEROBOT_HOM
 
   `os.getenv("名字", 默认值)`：有这个环境变量就用它，没有就用默认值。所以我们**不改 LeRobot 的任何代码**，
   只设两个环境变量，就把数据和标定的位置改了。
+
+- `PYTHONUTF8 = "1"` 打开 Python 的 **UTF-8 模式**。中文 Windows 上 Python 写文本文件默认用 cp936 编码；
+  LeRobot 保存第 2 条及以后的 episode 时，会写一个临时的 ffmpeg 拼接清单（里面是视频的绝对路径），
+  没指定编码。仓库路径里有"桌面"这样的中文时，ffmpeg 读不懂这个清单，报
+  `[Errno 22] Invalid argument: ...ffconcat`。打开 UTF-8 模式后所有没指定编码的文件都按 UTF-8 写，问题消失。
 
 - 这样设置**只对当前 PowerShell 窗口有效**，关掉窗口就没了，不会影响电脑上的其他项目。
   `robot.ps1` 和 `train.ps1` 开头都用 `. (Join-Path $PSScriptRoot "env.ps1")` 加载它。
@@ -858,6 +866,57 @@ smolvla 预设和笔记本的区别是 batch 从 8 提到 32、步数从 3 万�
 
 > `.sh` 和 `.sbatch` 必须用 Linux 换行符（LF），否则 bash 会报 `$'\r': command not found`。
 > `.gitattributes` 里的 `*.sh text eol=lf` 保证了这一点。
+
+## 12. `scripts/make_gif.py`
+
+**问题：** README 里要放机器人实际运行的动图。评估录下的视频在数据集里，但 LeRobot 把很多条 episode
+接在**同一个 MP4** 里，每台相机一个文件，不能直接拿来用。
+
+### 找到这条 episode 在视频里的哪一段
+
+```python
+row = meta[meta["episode_index"] == episode].iloc[0]
+key = f"videos/observation.images.{camera}"
+path = ds / "videos" / ... / f"file-{file:03d}.mp4"
+return path, row[f"{key}/from_timestamp"], row[f"{key}/to_timestamp"]
+```
+
+数据集的 `meta/episodes/*.parquet` 是一张表，每条 episode 一行，记着它在哪个视频文件、从第几秒到第几秒。
+
+### 用 ffmpeg 剪辑、拼接、转 GIF
+
+```python
+inputs += ["-ss", start, "-to", end, "-i", path]            # 每台相机各剪一段
+labels.append(f"[{i}:v]setpts=PTS/{speed},fps={fps},scale=-2:{height}[v{i}]")
+graph = ";".join(labels) + ";[v0][v1]hstack=inputs=2,split[a][b];[a]palettegen[p];[b][p]paletteuse"
+```
+
+| 滤镜 | 作用 |
+|---|---|
+| `setpts=PTS/2` | 时间戳除以 2，即 2 倍速播放 |
+| `fps=10` | 降到每秒 10 帧（GIF 帧越多文件越大） |
+| `scale=-2:240` | 高度缩到 240，宽度按比例（`-2` 表示保持偶数） |
+| `hstack` | 两台相机左右拼成一张 |
+| `palettegen` + `paletteuse` | GIF 只能有 256 色。先从整段视频统计出最合适的调色板，再用它转换，色带少很多 |
+
+- 📘 `filter_complex` 是 ffmpeg 的滤镜图：`[0:v]` 是第 1 个输入的视频，`[v0]` 这类是自己起的中间结果名字，用 `;` 分隔每一步。
+- 📘 `subprocess.run([...], check=True)`：从 Python 里运行一个外部程序，`check=True` 表示它失败就抛异常。
+- 两个 GIF 各约 3 MB。
+
+## 13. `scripts/plot_results.py`
+
+**问题：** 每个策略评估完都要更新 README 的图。手工画容易和记录表对不上。
+
+**思路：** 只从 `results/<策略>.md` 的记录表读数据，生成 `assets/results.svg`。以后每评估完一个策略，重新运行一次即可。
+
+```python
+ROW = re.compile(r"^\|\s*\d+\s*\|\s*([①②③④⑤])\s*\|\s*(✅|🟡|❌)\s*\|")
+```
+
+- 📘 正则表达式：匹配 `| 12 | ② | ✅ |` 这种行。`\d+` 是数字，`\s*` 是任意空格，`( ... )` 是要取出的部分，
+  这里取出点位和结果两样。
+- 直接拼 SVG 文本：SVG 是用 XML 描述图形的文本格式，`<rect>` 是矩形（柱子），`<text>` 是文字。
+  GitHub 能直接显示 SVG，所以不需要装 matplotlib。
 
 ---
 
