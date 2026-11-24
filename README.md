@@ -27,7 +27,7 @@ the same protocol (see [docs/08_evaluation.md](docs/08_evaluation.md)).
 | Policy | Train steps | Train time | Success rate (n=20) | Model | Rollout video |
 |---|---|---|---|---|---|
 | ACT | 50k (≈27 epochs) | 4.0 h (RTX 3070 Laptop) | **50%** (10/20; [details](results/act.md)) | [act_so101_pick_place](https://huggingface.co/Yufeng1216/act_so101_pick_place) | – |
-| Diffusion Policy | 100k (≈53 epochs) | ≈4 h (Tesla V100 16 GB) | – | [diffusion_so101_pick_place](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) | – |
+| Diffusion Policy | 100k (≈53 epochs) | ≈4 h (Tesla V100 16 GB) | **75%** (15/20; [details](results/diffusion.md)) | [diffusion_so101_pick_place](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) | – |
 | SmolVLA | – | – | – | – | – |
 | π₀.₅ | – | – | – | – | – |
 | Zero-shot VLM + IK | 0 (no demos) | – | – | – | – |
