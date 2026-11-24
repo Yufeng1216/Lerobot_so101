@@ -51,6 +51,8 @@ ACT、Diffusion Policy、SmolVLA、π₀.₅ 的区别，只在"怎么建模 p(a
 |---|---|---|---|
 | `.py` | Python 源代码 | `python scripts/xxx.py` 运行；VS Code 打开编辑 | `scripts/scan_motors.py` |
 | `.ps1` | PowerShell 脚本：把一串命令打包成一个，Windows 上的"批处理" | 在 PowerShell 里 `.\scripts\robot.ps1 ...` 运行 | `scripts/robot.ps1`、`scripts/env.ps1` |
+| `.sh` | bash 脚本：Linux 上的"批处理"，作用和 `.ps1` 一样 | 在 Linux 终端里 `bash cloud/slurm/xxx.sh` 运行 | `cloud/slurm/setup_env.sh` |
+| `.sbatch` | 也是 bash 脚本，开头的 `#SBATCH` 行是给集群排队系统 Slurm 的资源申请 | `sbatch xxx.sbatch` 提交（本项目通过 `submit.sh`） | `cloud/slurm/train.sbatch` |
 
 ### B. 配置（文本）
 
@@ -59,6 +61,7 @@ ACT、Diffusion Policy、SmolVLA、π₀.₅ 的区别，只在"怎么建模 p(a
 | `.json` | 结构化数据：`{"键": 值}`，和 Python 的 dict 几乎一样。程序读它来获取设置 | `config/robot.json`（COM 口、相机编号），`config/calibration/**/*.json`（标定） |
 | `.gitignore` | 告诉 git **哪些文件不要上传**：大文件、密钥、本机配置。每行一个规则，`data/` 表示整个文件夹 | 根目录 |
 | `.gitattributes` | 告诉 git **怎么处理某类文件**。本项目用它统一换行符（Windows 用 CRLF，Linux 用 LF） | 根目录 |
+| `.env` | 一行一个 `名字=值` 的设置，脚本读进来当变量用。常放因人而异的设置，所以通常不进 git，只上传一个 `.example` 模板 | `cloud/slurm/site.env.example` |
 
 ### C. 文档（文本，进 git）
 
@@ -116,7 +119,7 @@ Lerobot/
 │   ├── robot.example.json 配置模板（会上传到 GitHub）
 │   ├── robot.json         你这台电脑的真实配置：COM 口、相机编号（不上传，每台电脑不一样）
 │   └── calibration/       两条臂的标定文件（上传：数据集依赖它）
-├── scripts/               自己写的小工具
+├── scripts/               在笔记本（Windows）上运行的工具：硬件、录制、本地训练、部署
 │   ├── env.ps1            所有脚本共用的环境设置：让 LeRobot 把数据集、标定存进本仓库
 │   ├── find_hardware.py   列出串口和相机，并给每个相机拍一张照片
 │   ├── scan_motors.py     只读地检查 6 个舵机的 ID 和角度
@@ -125,11 +128,23 @@ Lerobot/
 │   ├── robot.ps1          读 config/robot.json，拼好标定/遥操作/录制/部署命令
 │   ├── train.ps1          训练入口：每个策略的参数预设
 │   ├── bench_dataloader.py 测试不同数据加载设置的速度（训练前调优用）
-│   └── lerobot_train_win.py  Windows 修复版 lerobot-train（见 docs/04_act.md）
+│   ├── lerobot_train_win.py  Windows 修复版 lerobot-train（见 docs/04_act.md）
+│   └── align_camera.py    相机被碰歪后，对照录制时的画面把它摆回原位
+├── cloud/                 在别的机器上训练（笔记本 8 GB 显存放不下的模型）
+│   ├── README.md          使用说明
+│   └── slurm/             Linux GPU 集群（Slurm 排队系统）：装环境、提交训练任务
+│       ├── site.env.example  账号等个人设置的模板（真实的 site.env 不上传）
+│       ├── setup_env.sh   一次性装环境
+│       ├── submit.sh      检查账号后提交任务
+│       └── train.sbatch   训练任务本身
 ├── docs/                  中文教程，一个阶段一个文件
 ├── data/                  录好的数据集（不上传 git，HF Hub 上有一份）
-└── outputs/               运行时产生的东西：截图、训练 checkpoint、日志（不上传）
+├── outputs/               运行时产生的东西：截图、训练 checkpoint、日志（不上传）
+└── notes/                 个人开发日志（只在本地，不上传）
 ```
+
+**本地和云端怎么分：** `scripts/` 里的东西都在笔记本上运行；`cloud/` 里的东西在别的机器上运行。
+两边训练同一个策略时，参数保持一致，唯一的区别是更大的显卡可以用论文的默认模型大小。
 
 为什么数据集和模型不放进 git？git 是为**文本代码**设计的，几百 MB 的视频和权重放进去会让仓库臃肿、
 clone 很慢，GitHub 也限制单文件 100 MB。业界做法是：代码放 GitHub，数据集和模型放 Hugging Face Hub，

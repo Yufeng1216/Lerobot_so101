@@ -17,6 +17,7 @@ Python / PowerShell 语法在第一次出现时解释（标为 📘）。
 | 4 训练 | [`bench_dataloader.py`](#7-scriptsbench_dataloaderpy) | 找出最快的数据加载设置 |
 | 4 训练 | [`train.ps1`](#8-scriptstrainps1) | 训练入口和每个策略的参数预设 |
 | 4 训练 | [`lerobot_train_win.py`](#9-scriptslerobot_train_winpy) | 修复 Windows 上的 checkpoint 链接问题 |
+| 5 云端 | [`cloud/slurm/*`](#11-cloudslurm在-gpu-集群上训练) | 在 Linux GPU 集群上装环境、提交训练任务 |
 | 内部 | [LeRobot 内部做了什么](#10-lerobot-内部我们调用的命令在做什么) | 录制循环、数据集、训练循环、ACT 前向 |
 
 ---
@@ -554,16 +555,36 @@ switch ($Policy) {
             "--batch_size=8", "--steps=$Steps", "--save_freq=20000"
         )
     }
+    "smolvla" {
+        if ($Steps -eq 0) { $Steps = 30000 }
+        $argsList += @(
+            "--policy.path=lerobot/smolvla_base",          # 从预训练权重开始微调
+            '--rename_map={\"observation.images.top\":\"observation.images.camera1\",...}',
+            "--batch_size=8", "--steps=$Steps",
+            "--policy.scheduler_decay_steps=$Steps",       # 学习率衰减和总步数对齐
+            "--save_freq=10000"
+        )
+    }
 }
 ```
 
 `-Steps` 默认是 0，表示"用这个策略的推荐值"；冒烟测试时传 `-Steps 200` 覆盖它。
-每个策略一个分支；SmolVLA、π₀.₅ 之后也加在这里。
+每个策略一个分支。π₀.₅ 在云端训练，不在这里。
 
 - `--policy.xxx`：改策略本身的结构参数（对应 `configuration_diffusion.py` 里的字段）。
   命令行里的列表写成 `[240,320]`，LeRobot 的配置解析器（draccus）会把它转成 Python 的元组。
 - `--ema.xxx`：训练流程的参数，不属于策略。ACT 不用 EMA，所以只在 diffusion 分支里出现。
-- 为什么这三个参数这样设，见 [05_diffusion_policy.md](05_diffusion_policy.md) 第 5 节。
+- diffusion 分支把 U-Net 通道减半，是为了能在 8 GB 显存上训练；本项目最终的模型是在集群上用默认大小训的（见第 11 节）。
+- 为什么这几个参数这样设，见 [05_diffusion_policy.md](05_diffusion_policy.md) 第 5 节。
+
+**smolvla 分支的两个新东西：**
+
+- `--policy.path` 和 `--policy.type` 的区别：`type` 按默认结构**新建**一个随机初始化的模型；
+  `path` 从一个已有的 checkpoint（本地目录或 Hub 上的名字）**加载**结构和权重。微调要用 `path`。
+- `--rename_map` 的值是一个 JSON 字典，里面有双引号。Windows PowerShell 5.1 把参数传给外部程序（这里是 python）时，
+  会**吃掉**参数里的普通双引号，python 收到的就变成 `{observation.images.top:...}`，解析失败。
+  写成 `\"` 后，PowerShell 原样传过去，python 再把 `\"` 解读成一个双引号。
+  整个参数用单引号 `'...'` 包起来，PowerShell 就不会去解析里面的 `$` 和反引号。
 
 ---
 
@@ -612,6 +633,46 @@ if __name__ == "__main__":
 - `_winapi.CreateJunction`：Python 标准库里 Windows 专用的建联接函数。目标必须是绝对路径，所以用 `.resolve()`。
 - `if sys.platform == "win32"`：只在 Windows 上替换，同一份代码在 Linux 上行为和原版完全一样。
 - 最后调用 LeRobot 原本的 `main()`。命令行参数原样传给它，所以这个文件的用法和 `lerobot-train` 完全相同。
+
+### 第二个补丁：Hub 模型名里的斜杠
+
+**问题：** 微调 SmolVLA 时要写 `--policy.path=lerobot/smolvla_base`（Hub 上的模型名，格式是"用户/模型"）。
+LeRobot 把它存成了 `Path` 对象，而在 Windows 上 `str(Path("lerobot/smolvla_base"))` 会变成 `lerobot\smolvla_base`，
+Hub 不认带反斜杠的名字，报 `Repo id must use alphanumeric chars ...`。Linux 的路径分隔符本来就是 `/`，所以只有 Windows 出错。
+
+```python
+def _fix_hub_id(name_or_path):
+    name = str(name_or_path)
+    if "\\" in name and not os.path.exists(name):
+        return name.replace("\\", "/")
+    return name_or_path
+
+def hub_safe_from_pretrained(original):
+    def from_pretrained(cls, *args, **kwargs):
+        if args:
+            args = (_fix_hub_id(args[0]), *args[1:])
+        for key in ("pretrained_name_or_path", "pretrained_model_name_or_path"):
+            if key in kwargs:
+                kwargs[key] = _fix_hub_id(kwargs[key])
+        return original(cls, *args, **kwargs)
+    return classmethod(from_pretrained)
+
+for klass in (PreTrainedPolicy, DataProcessorPipeline):
+    klass.from_pretrained = hub_safe_from_pretrained(klass.__dict__["from_pretrained"].__func__)
+```
+
+- **判断规则：** 名字里有反斜杠、而且本地**不存在**这个路径，说明它是被转坏的 Hub 名字，把 `\` 换回 `/`。
+  如果是真实存在的本地文件夹（比如 `outputs\train\...\pretrained_model`），保持不变。
+- **要改两个加载器：** 一个预训练策略包括**权重**（`PreTrainedPolicy.from_pretrained` 加载）和**前后处理配置**
+  （`DataProcessorPipeline.from_pretrained` 加载，比如归一化参数）。第一次只改了前者，模型加载成功了，
+  却又在加载处理配置时报同样的错，所以两个都要改。
+- 名字有时按位置传（`from_pretrained("lerobot/x")`），有时按关键字传（`from_pretrained(pretrained_model_name_or_path=...)`），
+  而且两个加载器的参数名还不一样，所以 `*args, **kwargs` 两种情况都处理。
+- 这是一个**装饰器**式的写法：`hub_safe_from_pretrained` 接收原函数，返回一个"先修名字、再调用原函数"的新函数。
+- `from_pretrained` 是 **classmethod**（类方法，第一个参数是类 `cls` 而不是实例）。
+  `klass.__dict__["from_pretrained"]` 取出的是 classmethod 对象本身，`.__func__` 是它包着的普通函数；
+  我们包一层后再用 `classmethod(...)` 包回去。
+- 只改基类就够了：SmolVLA 没有自己重写 `from_pretrained`，调用时会沿继承链找到基类上的新版本。
 
 ---
 
@@ -682,6 +743,109 @@ loss = L1(预测动作, 真实动作，忽略 action_is_pad 的位置) + 10 × K
 ```
 
 日志里的 `l1_loss` 和 `kld_loss` 就是这两项。
+
+---
+
+## 11. `cloud/slurm/`：在 GPU 集群上训练
+
+这几个文件是 **bash 脚本**，在 Linux 集群上运行，不在 Windows 上运行。用法见 [cloud/README.md](../cloud/README.md)。
+分工：`setup_env.sh` 装一次环境；`submit.sh` 读个人设置、检查账号、提交；`train.sbatch` 是任务本身。
+
+### 个人设置和代码分开：`site.env`
+
+```bash
+ACCOUNT=...                  # 计费账号
+PARTITION=gpu                # GPU 分区
+TIME=08:00:00                # 不能超过账号允许的最长时间
+ALLOWED_ACCOUNT_PREFIX=...   # 只允许以它开头的账号
+```
+
+账号名因人而异，所以真实的 `site.env` 被 `.gitignore` 排除，仓库里只放模板 `site.env.example`，
+和 `config/robot.json` / `robot.example.json` 是同一个思路。
+
+### `setup_env.sh`
+
+```bash
+set -euo pipefail
+```
+
+bash 的"安全模式"：`-e` 任何命令失败就停；`-u` 用到未定义的变量就报错；`-o pipefail` 管道里任何一段失败都算失败。
+
+```bash
+if [ ! -x "$CONDA_DIR/bin/conda" ]; then ... fi
+```
+
+`~/miniforge3/bin/conda` 不存在（`!` 取反，`-x` 表示"存在且可执行"）才安装 Miniforge。所以脚本**可以重复运行**，装过的会跳过。
+
+安装的版本和笔记本对齐（Python 3.12、LeRobot 0.7.0、torch 2.11），另外有三处 Linux 特有的处理，脚本注释里写了原因：
+
+| 处理 | 原因 |
+|---|---|
+| PyTorch 用 **CUDA 12.6** 版（`cu126`） | CUDA 12.8 版不再包含 V100（计算能力 7.0）的 GPU 程序，会报 `no kernel image is available` |
+| 卸掉 torchcodec，训练时用 `--dataset.video_backend=pyav` | torchcodec 的 Linux 安装包是给 CUDA 13 编译的，和 cu126 的 PyTorch 配不上 |
+| 装 conda 的 `libstdcxx-ng`，并把 `$CONDA_PREFIX/lib` 放到 `LD_LIBRARY_PATH` 最前面 | 否则程序会先加载集群系统里较旧的 C++ 运行库，导入 `sqlite3` 时报 `CXXABI_1.3.15 not found` |
+
+### `submit.sh`
+
+```bash
+POLICY="${1:?usage: ...}"
+```
+
+`$1` 是命令行的第一个参数（如 `diffusion`）。`${1:?提示}` 表示"没传就打印提示并退出"。
+
+```bash
+case "$ACCOUNT" in
+    "$ALLOWED_ACCOUNT_PREFIX"*) ;;
+    *) echo "ERROR: ..." >&2; exit 1 ;;
+esac
+```
+
+bash 的模式匹配：账号以允许的前缀开头（`*` 表示后面可以是任何字符）就放行，否则报错退出（`>&2` 表示写到错误输出）。
+有多个计费账号、但只有一个能用于本项目时，这一步防止填错。
+
+```bash
+sbatch --account="$ACCOUNT" --partition="$PARTITION" --time="$TIME" --job-name="$POLICY" train.sbatch "$POLICY"
+```
+
+把个人设置作为命令行参数交给 `sbatch`，所以 `train.sbatch` 里不需要写任何账号信息。
+
+### `train.sbatch`
+
+```bash
+#SBATCH --gpus=1
+#SBATCH --cpus-per-task=8
+#SBATCH --output=logs/%x_%j.log
+```
+
+对 bash 是注释，对 Slurm 是**资源申请**：1 块 GPU、8 个 CPU 核（给数据加载进程用），日志写到 `logs/任务名_任务编号.log`。
+
+任务开始时**再检查一次账号**（`SLURM_JOB_ACCOUNT` 是 Slurm 自动设置的环境变量），双保险。
+
+```bash
+if [ -d "$OUT/checkpoints/last" ]; then
+    srun lerobot-train --config_path=.../train_config.json --resume=true
+    exit
+fi
+```
+
+集群任务有时长上限。超时被停后再提交一次，这里发现已有 checkpoint，就接着训，和 `train.ps1 -Resume` 一样。
+
+```bash
+COMMON=( --dataset.repo_id=... --eval_steps=2000 ... )
+case "$POLICY" in
+    diffusion) PRESET=( --policy.type=diffusion ... ) ;;
+    smolvla)   PRESET=( --policy.path=lerobot/smolvla_base '--rename_map={...}' --batch_size=32 ... ) ;;
+esac
+srun lerobot-train "${COMMON[@]}" "${PRESET[@]}"
+```
+
+和 `train.ps1` 一样分成"所有策略共用的参数"和"每个策略的预设"。`( ... )` 是 bash 数组，`"${COMMON[@]}"` 把数组展开成一个个参数。
+集群上的 diffusion 预设和笔记本的唯一区别是**不减半 U-Net 通道数**：V100 有 16 GB 显存，能放下论文默认的 278M 参数。
+smolvla 预设和笔记本的区别是 batch 从 8 提到 32、步数从 3 万降到 2 万，并且每 5000 步存一次（超时重提交损失更少）。
+`rename_map` 整个参数用单引号包住：bash 里单引号内的 `"` 原样传给程序（PowerShell 5.1 里则要写成 `\"`，见第 8 节）。
+
+> `.sh` 和 `.sbatch` 必须用 Linux 换行符（LF），否则 bash 会报 `$'\r': command not found`。
+> `.gitattributes` 里的 `*.sh text eol=lf` 保证了这一点。
 
 ---
 

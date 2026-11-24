@@ -123,37 +123,55 @@
 只有 8 GB 显卡又想在本地训，可以用 `train.ps1` 的 diffusion 预设：它把通道数减半（论文里也用过这组），
 其余设置相同。
 
-## 7. 正式训练（Linux / 集群）
+## 7. 正式训练（Linux GPU 集群）
 
-集群是 Linux，直接用 `lerobot-train`，参数和第 5 节一致：
+用 `cloud/slurm/` 里的脚本，参数和第 5 节一致。完整步骤见 [cloud/README.md](../cloud/README.md)，核心三步：
 
 ```bash
-lerobot-train \
-    --dataset.repo_id=Yufeng1216/so101_pick_place --dataset.eval_split=0.1 --eval_steps=2000 \
-    --policy.type=diffusion --policy.device=cuda \
-    --policy.resize_shape=[240,320] --policy.crop_ratio=0.95 --ema.type=warmup \
-    --batch_size=8 --steps=100000 --save_freq=20000 --num_workers=8 \
-    --output_dir=outputs/train/diffusion_so101_pick_place --job_name=diffusion_so101_pick_place \
-    --policy.repo_id=Yufeng1216/diffusion_so101_pick_place
+bash cloud/slurm/setup_env.sh          # 一次性装环境
+bash cloud/slurm/submit.sh diffusion   # 提交训练任务
+tail -f logs/diffusion_<任务编号>.log   # 看训练日志
 ```
 
-集群上的任务有时长上限，被停掉后用 `--config_path=<输出目录>/checkpoints/last/pretrained_model/train_config.json --resume=true` 接着训。
-训完把 `checkpoints/last/pretrained_model_ema` 拷回笔记本用于部署。
+实测（Tesla V100 16 GB，batch 8）：
 
-Diffusion 的 `train/loss` 是噪声预测的 MSE，数值和 ACT 的 loss **不能直接比较**，只看它自己的趋势。
+| `step_s`（每步） | `data_s`（等数据） | 显存 | 10 万步总时长 |
+|---|---|---|---|
+| 0.127 s | 0.003 s | 6.5 GB | 约 4 小时（含验证） |
+
+- 集群任务有时长上限。被停掉后再运行一次 `submit.sh diffusion`，会从上一个 checkpoint 接着训。
+- Diffusion 的 `train/loss` 是噪声预测的 MSE，数值和 ACT 的 loss **不能直接比较**，只看它自己的趋势。
+
+训完把模型拷回笔记本（约 1 GB，只拷 EMA 权重，不拷优化器状态），在笔记本上运行：
+
+```powershell
+scp -r <用户名>@<集群传输节点>:~/Lerobot/outputs/train/diffusion_so101_pick_place/checkpoints/last/pretrained_model_ema outputs/train/diffusion_so101_pick_place/
+```
+
+本项目训好的模型：[Yufeng1216/diffusion_so101_pick_place](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place)。
 
 ## 8. 在真机上运行
 
 ```powershell
-.\scripts\robot.ps1 rollout -Policy outputs/train/diffusion_so101_pick_place/checkpoints/last/pretrained_model_ema -Duration 30
+.\scripts\robot.ps1 rollout -Policy outputs/train/diffusion_so101_pick_place/pretrained_model_ema -Duration 30
 ```
 
-推理时每次生成要去噪 100 步。如果从臂动作一顿一顿的（生成跟不上 30 Hz），可以换成更快的 DDIM 采样器，
-只去噪 10 步：
+离线实测（RTX 3070 Laptop，拿数据集里的画面喂给模型）：
+
+| 采样器 | 每次生成 | 和示范动作的平均绝对误差（8 帧 × 6 个关节） |
+|---|---|---|
+| DDPM 100 步（训练时的默认） | 约 1.5 s | 3.2 |
+| DDIM 10 步 | 约 0.16 s | 3.3 |
+
+每次生成 32 步动作（`n_action_steps`），30 Hz 下只够执行约 1.07 s。DDPM 100 步生成比执行还慢，
+从臂每执行完一段就要停下来等；DDIM 10 步快 10 倍，误差几乎不变，**真机上用 DDIM**：
 
 ```powershell
-... --policy.noise_scheduler_type=DDIM --policy.num_inference_steps=10
+.\scripts\robot.ps1 rollout -Policy outputs/train/diffusion_so101_pick_place/pretrained_model_ema -Duration 30 --policy.noise_scheduler_type=DDIM --policy.num_inference_steps=10
 ```
+
+单帧误差在 0.4 到 7 之间，示范刚开始、手臂从静止起步时肘关节偏差最大（十几到二十多）。
+这只是离线对比：起步时机本身就不确定，偏差大不一定是错；真正的指标是真机成功率。
 
 ## 9. 和 ACT 对比时要看什么
 

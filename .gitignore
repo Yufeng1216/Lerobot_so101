@@ -31,6 +31,8 @@ desktop.ini
 .vscode/
 .idea/
 
-# Personal dev notes and machine-specific cluster setup (local only, backed up with the folder)
+# Personal dev notes (local only, backed up with the folder)
 notes/
-cluster/
+
+# Per-user cluster settings (account names); template: cloud/slurm/site.env.example
+cloud/slurm/site.env

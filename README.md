@@ -27,7 +27,7 @@ the same protocol (see [docs/08_evaluation.md](docs/08_evaluation.md)).
 | Policy | Train steps | Train time | Success rate (n=20) | Model | Rollout video |
 |---|---|---|---|---|---|
 | ACT | 50k (≈27 epochs) | 4.0 h (RTX 3070 Laptop) | – | [act_so101_pick_place](https://huggingface.co/Yufeng1216/act_so101_pick_place) | – |
-| Diffusion Policy | – | – | – | – | – |
+| Diffusion Policy | 100k (≈53 epochs) | ≈4 h (Tesla V100 16 GB) | – | [diffusion_so101_pick_place](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) | – |
 | SmolVLA | – | – | – | – | – |
 | π₀.₅ | – | – | – | – | – |
 | Zero-shot VLM + IK | 0 (no demos) | – | – | – | – |
@@ -49,7 +49,8 @@ the same protocol (see [docs/08_evaluation.md](docs/08_evaluation.md)).
 
 ```
 config/          robot.example.json  → copy to robot.json (your COM ports, camera indices, HF user)
-scripts/         helper scripts (hardware discovery, motor scan, PowerShell wrappers for each stage)
+scripts/         runs on the Windows laptop: hardware checks, recording, local training, deployment
+cloud/           runs elsewhere: Slurm GPU-cluster scripts for models that need more than 8 GB
 docs/            step-by-step tutorial, one file per stage
 ```
 
@@ -65,7 +66,7 @@ New to the tooling? Start with [docs/how_this_repo_works.md](docs/how_this_repo_
 | 3 | Recording a dataset | [docs/03_data_collection.md](docs/03_data_collection.md) |
 | 4 | ACT | [docs/04_act.md](docs/04_act.md) |
 | 5 | Diffusion Policy | [docs/05_diffusion_policy.md](docs/05_diffusion_policy.md) |
-| 6 | SmolVLA | docs/06_smolvla.md |
+| 6 | SmolVLA | [docs/06_smolvla.md](docs/06_smolvla.md) |
 | 7 | π₀.₅ | docs/07_pi05.md |
 | 8 | Evaluation protocol and comparison | [docs/08_evaluation.md](docs/08_evaluation.md) |
 | 9 | Zero-shot baseline: VLM + IK, no demonstrations | [docs/09_zero_shot_vlm.md](docs/09_zero_shot_vlm.md) |

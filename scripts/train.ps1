@@ -14,7 +14,7 @@
 #>
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet("act", "diffusion")]   # smolvla / pi05 are added as we reach them
+    [ValidateSet("act", "diffusion", "smolvla")]   # pi05 trains in the cloud (cloud/)
     [string]$Policy,
 
     [string]$Dataset = "so101_pick_place",   # dataset name under your HF user
@@ -95,6 +95,23 @@ else {
                 "--batch_size=8",
                 "--steps=$Steps",
                 "--save_freq=20000"
+            )
+        }
+        "smolvla" {
+            # Fine-tune the pretrained SmolVLA (SmolVLM2-500M + flow-matching action expert, ~450M
+            # params). Defaults keep the vision encoder frozen and train only the action expert.
+            # smolvla_base was pretrained with cameras named camera1/camera2/camera3: map ours onto
+            # the first two (top = overhead view, wrist = gripper view); camera3 is simply absent.
+            # The \" escapes survive Windows PowerShell 5.1, which strips plain " from native args.
+            if ($Steps -eq 0) { $Steps = 30000 }
+            $argsList += @(
+                "--policy.path=lerobot/smolvla_base",
+                '--rename_map={\"observation.images.top\":\"observation.images.camera1\",\"observation.images.wrist\":\"observation.images.camera2\"}',
+                "--batch_size=8",
+                "--steps=$Steps",
+                # The default schedule decays the LR over 30k steps; keep it aligned with -Steps.
+                "--policy.scheduler_decay_steps=$Steps",
+                "--save_freq=10000"
             )
         }
     }
