@@ -726,6 +726,17 @@ if [ ! -x "$CONDA_DIR/bin/conda" ]; then ... fi
 几块 GPU、最长跑多久、日志写到哪（`%x` = 任务名，`%j` = 任务编号）。
 
 ```bash
+case "${SLURM_JOB_ACCOUNT:-}" in
+    *othercourse*) echo "ERROR: ..." >&2; exit 1 ;;
+esac
+```
+
+安全检查。Slurm 运行任务时会把计费账号名放进环境变量 `SLURM_JOB_ACCOUNT`。`case ... in *othercourse*)` 是 bash 的
+模式匹配：账号名里只要含 `othercourse` 就打印错误并退出（`>&2` 表示写到错误输出）。
+因为两个课程账号里只有 course 允许用于本项目，万一填错，任务会在开始训练前就停下。
+`${SLURM_JOB_ACCOUNT:-}` 的 `:-` 表示变量不存在时当作空字符串，避免 `set -u` 报错。
+
+```bash
 export HF_LEROBOT_HOME="$PWD/data"
 ```
 

@@ -170,6 +170,8 @@ cd ~/Lerobot
 bash cluster/setup_env.sh
 
 # 4) 查看自己有哪些计费账号，把名字填进 sbatch 文件的 --account=
+#    只能用 course 的账号；other course 的课程资源明确不允许用于本项目
+#    （脚本里有检查：账号名含 othercourse 会直接退出）
 my_accounts
 nano cluster/train_diffusion_full.sbatch
 
