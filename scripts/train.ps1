@@ -14,7 +14,7 @@
 #>
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet("act")]           # diffusion / smolvla / pi05 are added as we reach them
+    [ValidateSet("act", "diffusion")]   # smolvla / pi05 are added as we reach them
     [string]$Policy,
 
     [string]$Dataset = "so101_pick_place",   # dataset name under your HF user
@@ -73,6 +73,28 @@ else {
                 "--batch_size=8",
                 "--steps=$Steps",
                 "--save_freq=10000"
+            )
+        }
+        "diffusion" {
+            # Diffusion Policy defaults (n_obs_steps=2, horizon=64, n_action_steps=32, DDPM with
+            # 100 steps, U-Net down_dims 512/1024/2048, lr=1e-4 cosine) follow the paper.
+            # Changed for an 8 GB laptop GPU and a 50-episode dataset:
+            #   resize_shape 240x320 : 4x fewer pixels per camera -> fits in VRAM and trains faster
+            #   crop_ratio 0.95      : random 95% crop during training = data augmentation (paper)
+            #   ema warmup           : exponential moving average of weights, standard for diffusion
+            if ($Steps -eq 0) { $Steps = 100000 }
+            $argsList += @(
+                "--policy.type=diffusion",
+                "--policy.resize_shape=[240,320]",
+                "--policy.crop_ratio=0.95",
+                # U-Net channels halved (default 512/1024/2048 = 278M params): with fp32 weights,
+                # grads, Adam and the EMA copy that alone is ~5.5 GB, so 8 GB overflowed into
+                # shared system memory and training slowed to ~2 min/step.
+                "--policy.down_dims=[256,512,1024]",
+                "--ema.type=warmup",
+                "--batch_size=8",
+                "--steps=$Steps",
+                "--save_freq=20000"
             )
         }
     }

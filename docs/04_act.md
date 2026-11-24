@@ -136,7 +136,7 @@ AMP 没有加速，所以用默认 fp32。50,000 步 × 0.28 s ≈ **4 小时**�
 | 策略 | 参数量 | 训练位置 |
 |---|---|---|
 | ACT | 52M | 本地（RTX 3070 8 GB 足够） |
-| Diffusion Policy | ~263M | 先本地 |
+| Diffusion Policy | 89M（U-Net 减半，见 05） | 本地 |
 | SmolVLA | ~450M | 本地试小 batch，不行再上云 |
 | π₀.₅ | ~3B | 云端（官方示例按 80 GB 显卡配置） |
 
@@ -166,6 +166,31 @@ outputs/train/act_so101_pick_place/
 ```
 
 训练结束后，模型会自动上传到 `https://huggingface.co/Yufeng1216/act_so101_pick_place`。
+
+### 本项目的实际训练结果
+
+50,000 步用时 **4 小时 01 分**（3.7 步/秒），5 个 checkpoint 全部保存。验证集 loss（每 2000 步一次）：
+
+| 步数 | 2k | 4k | 6k | 8k | 10k | 20k | 30k | 40k | 50k |
+|---|---|---|---|---|---|---|---|---|---|
+| `eval_loss` | 0.406 | 0.405 | 0.396 | 0.379 | 0.385 | 0.387 | 0.380 | 0.387 | 0.381 |
+
+怎么读这张表：
+
+- 验证 loss **在 8k 步（约 4 个 epoch）后就基本不再下降**，之后一直在 0.38 附近小幅波动。
+  这和"模仿学习通常 5–10 个 epoch 就收敛"的经验一致。
+- 它也**没有上升**，所以继续训练没有造成明显的过拟合。
+- 但验证 loss 持平**不代表**后面的训练没用：训练 loss 还在降，动作可能变得更精细，
+  而这只有在真机闭环里才看得出来。所以真机评估时会对比 10k / 30k / 50k 三个 checkpoint。
+
+> **上传失败的坑：** 训练结束时自动上传到 Hub 报了 `401 Unauthorized`。原因是本机的 HF 登录过期了，
+> 训练本身不受影响，模型完整保存在本地。重新运行 `hf auth login` 后，用下面的命令手动上传：
+>
+> ```powershell
+> hf upload Yufeng1216/act_so101_pick_place outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model .
+> ```
+>
+> 教训：长时间训练之前先运行 `hf auth whoami`，确认还登录着。
 
 中断了可以接着训：
 

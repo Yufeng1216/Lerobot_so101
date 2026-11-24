@@ -543,11 +543,27 @@ switch ($Policy) {
         if ($Steps -eq 0) { $Steps = 50000 }
         $argsList += @("--policy.type=act", "--batch_size=8", "--steps=$Steps", "--save_freq=10000")
     }
+    "diffusion" {
+        if ($Steps -eq 0) { $Steps = 100000 }
+        $argsList += @(
+            "--policy.type=diffusion",
+            "--policy.resize_shape=[240,320]",   # 图像缩小一半，省显存
+            "--policy.crop_ratio=0.95",          # 训练时随机裁剪 = 数据增强
+            "--policy.down_dims=[256,512,1024]", # U-Net 通道减半：默认 278M 参数在 8 GB 显存里溢出
+            "--ema.type=warmup",                 # 额外保存一份权重的滑动平均
+            "--batch_size=8", "--steps=$Steps", "--save_freq=20000"
+        )
+    }
 }
 ```
 
 `-Steps` 默认是 0，表示"用这个策略的推荐值"；冒烟测试时传 `-Steps 200` 覆盖它。
-后面加 Diffusion、SmolVLA、π₀.₅ 时，就是在这里各加一个分支。
+每个策略一个分支；SmolVLA、π₀.₅ 之后也加在这里。
+
+- `--policy.xxx`：改策略本身的结构参数（对应 `configuration_diffusion.py` 里的字段）。
+  命令行里的列表写成 `[240,320]`，LeRobot 的配置解析器（draccus）会把它转成 Python 的元组。
+- `--ema.xxx`：训练流程的参数，不属于策略。ACT 不用 EMA，所以只在 diffusion 分支里出现。
+- 为什么这三个参数这样设，见 [05_diffusion_policy.md](05_diffusion_policy.md) 第 5 节。
 
 ---
 
