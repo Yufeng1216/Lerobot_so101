@@ -35,17 +35,76 @@ ACT、Diffusion Policy、SmolVLA、π₀.₅ 的区别，只在"怎么建模 p(a
 
 ## 3. 文件类型速查
 
-| 扩展名 | 是什么 | 用什么打开 | 本项目里的例子 |
+### 先分清两大类
+
+- **文本文件**：里面是人能读的字符，用记事本或 VS Code 打开就能看懂、能改。
+  代码、配置、文档都是文本文件。git 擅长管理它们：能精确显示"第几行改了什么"。
+- **二进制文件**：里面是给程序读的字节，用记事本打开是一堆乱码。
+  图片、视频、表格数据、模型权重都是二进制文件。它们通常很大，**不放进 git**。
+
+> Windows 默认隐藏扩展名。打开资源管理器 → 查看 → 显示 → 勾选"文件扩展名"和"隐藏的项目"，
+> 才能看到 `.py`、`.json` 这些后缀，以及 `.git`、`.gitignore` 这种以点开头的文件。
+
+### A. 代码和脚本（文本，进 git）
+
+| 文件 | 是什么 | 怎么用 | 本项目例子 |
 |---|---|---|---|
-| `.py` | Python 源代码。用 `python 文件名.py` 运行 | VS Code | `scripts/scan_motors.py` |
-| `.ps1` | PowerShell 脚本，Windows 的"批处理"。把一长串命令打包成一个 | VS Code；运行：`.\scripts\robot.ps1 ...` | `scripts/robot.ps1` |
-| `.json` | 配置数据，`{"键": 值}` 的结构，和 Python 的 dict 几乎一样 | 任何文本编辑器 | `config/robot.json` |
-| `.md` | Markdown 文档：`#` 是标题，`**粗体**`，``` 包起来的是代码块。GitHub 会自动渲染成网页 | VS Code（`Ctrl+Shift+V` 预览） | `README.md`、`docs/*.md` |
-| `.gitignore` | 告诉 git **哪些文件不要上传**（大文件、密钥、本机配置） | 文本编辑器 | 根目录 `.gitignore` |
-| `.jpg` | 图片 | 看图软件 | `outputs/hardware_check/camera_1.jpg` |
-| `.parquet` | 表格数据（列式存储），LeRobot 用它存关节角度和动作 | Python（pandas） | 录数据后出现 |
-| `.mp4` | 视频，LeRobot 把相机画面压成视频以节省空间 | 播放器 | 录数据后出现 |
-| `.safetensors` | 模型权重（和 `.pt` 类似但更安全、更快加载） | Python | 训练后出现 |
+| `.py` | Python 源代码 | `python scripts/xxx.py` 运行；VS Code 打开编辑 | `scripts/scan_motors.py` |
+| `.ps1` | PowerShell 脚本：把一串命令打包成一个，Windows 上的"批处理" | 在 PowerShell 里 `.\scripts\robot.ps1 ...` 运行 | `scripts/robot.ps1`、`scripts/env.ps1` |
+
+### B. 配置（文本）
+
+| 文件 | 是什么 | 本项目例子 |
+|---|---|---|
+| `.json` | 结构化数据：`{"键": 值}`，和 Python 的 dict 几乎一样。程序读它来获取设置 | `config/robot.json`（COM 口、相机编号），`config/calibration/**/*.json`（标定） |
+| `.gitignore` | 告诉 git **哪些文件不要上传**：大文件、密钥、本机配置。每行一个规则，`data/` 表示整个文件夹 | 根目录 |
+| `.gitattributes` | 告诉 git **怎么处理某类文件**。本项目用它统一换行符（Windows 用 CRLF，Linux 用 LF） | 根目录 |
+
+### C. 文档（文本，进 git）
+
+| 文件 | 是什么 | 本项目例子 |
+|---|---|---|
+| `.md` | Markdown：`#` 是标题，`**粗体**`，三个反引号包起来的是代码块，`\| a \| b \|` 是表格。GitHub 会自动渲染成网页。VS Code 里按 `Ctrl+Shift+V` 预览 | `README.md`、`docs/*.md` |
+| `LICENSE`（无扩展名） | 开源许可证：别人能不能用、怎么用你的代码。本项目是 MIT（几乎可以随便用，保留署名即可） | 根目录 |
+
+### D. 数据集里的文件（`data/Yufeng1216/so101_pick_place/`，不进 git，Hub 上有一份）
+
+| 文件 | 类型 | 是什么 |
+|---|---|---|
+| `meta/info.json` | 文本 | 数据集"说明书"：fps、总帧数、总 episode 数、每个键的形状和类型、视频编码格式 |
+| `meta/stats.json` | 文本 | 每个键的统计量（mean、std、min、max、分位数）。训练时用来归一化输入和输出 |
+| `meta/tasks.parquet` | 二进制 | 任务描述字符串表（本项目只有一句） |
+| `meta/episodes/.../*.parquet` | 二进制 | 每个 episode 的索引：从第几帧到第几帧、在视频里的起止时间 |
+| `data/.../*.parquet` | 二进制 | **核心数据表**：每帧一行，列是 `action`、`observation.state`、`timestamp`、`episode_index`…… |
+| `videos/<相机>/.../*.mp4` | 二进制 | 相机画面，AV1 编码。多个 episode 拼在同一个文件里 |
+
+`.parquet` 是一种**列式存储的表格**格式，比 CSV 小、读得快。想看里面的内容：
+
+```powershell
+python -c "import pandas as pd; df = pd.read_parquet('data/Yufeng1216/so101_pick_place/data/chunk-000/file-000.parquet'); print(df.head()); print(df.columns)"
+```
+
+### E. 训练产物（`outputs/train/<run>/checkpoints/<步数>/pretrained_model/`，不进 git，最终模型推到 Hub）
+
+| 文件 | 类型 | 是什么 |
+|---|---|---|
+| `model.safetensors` | 二进制 | **模型权重**（ACT 约 200 MB）。`.safetensors` 和 PyTorch 的 `.pt` 作用一样，但只存张量、不能藏可执行代码，所以更安全，加载也更快 |
+| `config.json` | 文本 | 策略结构参数：chunk_size、层数、输入输出特征。加载模型时先读它来搭网络 |
+| `train_config.json` | 文本 | 这次训练的**全部**设置（数据集、步数、学习率……）。可复现，也是 `-Resume` 时读取的文件 |
+| `policy_preprocessor.json` 和 `*_normalizer_processor.safetensors` | 文本 + 二进制 | 输入预处理的步骤，以及归一化用的均值和方差（从 `stats.json` 来）。部署时必须和权重一起用 |
+| `policy_postprocessor.json` 和 `*_unnormalizer_processor.safetensors` | 文本 + 二进制 | 输出后处理：把网络输出的归一化动作还原成真实的关节角度 |
+| `training_state/`（与 `pretrained_model/` 同级） | 文本 + 二进制 | `optimizer_state.safetensors`（Adam 的动量等）、`rng_state.safetensors`（随机数状态）、`training_step.json`（训到第几步）。只有恢复训练时用 |
+
+### F. 运行时产生的其他文件（`outputs/`，不进 git）
+
+| 文件 | 是什么 |
+|---|---|
+| `.jpg` | 图片：相机截图（`outputs/hardware_check/`）、数据集缩略图（`outputs/dataset_check/`） |
+| `.log` | 日志：程序运行时打印的全部文字，存成文件方便事后查看（`outputs/logs/`） |
+
+### G. 隐藏的 `.git/` 文件夹
+
+git 的"数据库"，存着所有历史版本。**不要手动修改或删除**；删了它，这个文件夹就不再是 git 仓库了。
 
 ## 4. 目录结构
 
