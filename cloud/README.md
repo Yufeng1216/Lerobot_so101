@@ -70,3 +70,10 @@ time spent queuing for a GPU.
 
 On Windows, LeRobot writes the model id into the job config as `lerobot\pi05_base`; the script restores the
 forward slash before the config is uploaded, otherwise the Linux job cannot find the model.
+
+The 3,000-step run finished in 7 h 6 min (≈ $18), final loss 0.008; the model is pushed to the private repo
+the job created. Training curve, download command and the deployment plan (the model does not fit the laptop
+GPU, so inference runs on a rented GPU through `lerobot-policy-server`) are in [docs/07_pi05.md](../docs/07_pi05.md).
+
+`hf jobs ps` / `hf jobs logs` print characters the Windows GBK console cannot encode; set `PYTHONUTF8=1` first
+(`scripts/env.ps1` does).

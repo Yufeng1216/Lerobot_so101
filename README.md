@@ -22,7 +22,7 @@ and comparing them against a **zero-shot baseline** that uses no demonstrations 
 | **ACT** | [Zhao et al., 2023](https://arxiv.org/abs/2304.13705) | ~52 M | CVAE + Transformer, action chunking | local RTX 3070 (8 GB) |
 | **Diffusion Policy** | [Chi et al., 2023](https://arxiv.org/abs/2303.04137) | ~278 M | DDPM/DDIM denoising over action chunks | university GPU cluster (Slurm) |
 | **SmolVLA** | [Shukor et al., 2025](https://arxiv.org/abs/2506.01844) | ~450 M | small VLM + flow-matching action expert | university GPU cluster (Slurm) |
-| **π₀.₅** | [Physical Intelligence, 2025](https://arxiv.org/abs/2504.16054) | ~3 B | VLA, PaliGemma + flow-matching expert | rented A100 80 GB (Hugging Face Jobs) |
+| **π₀.₅** | [Physical Intelligence, 2025](https://arxiv.org/abs/2504.16054) | ~4.1 B | VLA, PaliGemma + flow-matching expert | rented A100 80 GB (Hugging Face Jobs) |
 | **Zero-shot VLM + IK** (baseline) | — | ~2 B (VLM) | Qwen3-VL points at toy/box → table homography → IK → scripted grasp | no training |
 
 ## Results
@@ -42,7 +42,7 @@ Success = toy released inside the box. Per-trial sheets are in [`results/`](resu
 | ACT | 50k × 8 | 400k (≈27) | 4.0 h, RTX 3070 Laptop | **4/10** ([sheet](results/act.md)) | 17–69% | 0 | 6 | ~47 ms | [🤗](https://huggingface.co/Yufeng1216/act_so101_pick_place) | [gif](assets/act_success.gif) |
 | Diffusion Policy | 100k × 8 | 800k (≈53) | ≈4 h, Tesla V100 16 GB | **9/10** ([sheet](results/diffusion.md)) | 60–98% | 0 | 1 | ~200 ms (DDIM, 10 steps) | [🤗](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) | [gif](assets/diffusion_success.gif) |
 | SmolVLA | 20k × 32 | 640k (≈43) | training | – | – | – | – | – | – | – |
-| π₀.₅ | 3k × 32 | 96k (≈6) | training (≈7 h, A100 80 GB) | – | – | – | – | – | – | – |
+| π₀.₅ | 3k × 32 | 96k (≈6) | 7.1 h, A100 80 GB (≈ $18) | – | – | – | – | – | – | – |
 | Zero-shot VLM + IK | 0 (no demos) | 0 | – | – | – | – | – | – | – | – |
 
 <sub>Epochs over the 15k-frame training split (90% of 16,717 frames). 95% CI: Wilson score interval.</sub>
@@ -55,7 +55,7 @@ Success = toy released inside the box. Per-trial sheets are in [`results/`](resu
   demonstrations and the same evaluation protocol. This answers *"which method works better when deployed
   as intended on this task?"*, not *"which architecture is better at equal compute"*.
 - **Training steps are not comparable across rows.** Batch sizes differ (8 vs 32), model sizes differ by ~70×
-  (52 M to 3.6 B), and SmolVLA / π₀.₅ start from pretrained weights while ACT and Diffusion start from scratch.
+  (52 M to 4.1 B), and SmolVLA / π₀.₅ start from pretrained weights while ACT and Diffusion start from scratch.
   *Samples seen* and *train time* are listed so the budgets can be compared directly.
 - **Why 40 trials.** With 20 trials, 50% vs 75% would still have overlapping 95% intervals (30–70% vs 53–89%,
   Fisher's exact test p ≈ 0.19). With the 10 valid trials so far, 4/10 vs 9/10 gives p ≈ 0.06: a trend only.
@@ -113,7 +113,7 @@ New to the tooling? Start with [docs/how_this_repo_works.md](docs/how_this_repo_
 | 4 | ACT | [docs/04_act.md](docs/04_act.md) |
 | 5 | Diffusion Policy | [docs/05_diffusion_policy.md](docs/05_diffusion_policy.md) |
 | 6 | SmolVLA | [docs/06_smolvla.md](docs/06_smolvla.md) |
-| 7 | π₀.₅ | docs/07_pi05.md |
+| 7 | π₀.₅ | [docs/07_pi05.md](docs/07_pi05.md) |
 | 8 | Evaluation protocol and comparison | [docs/08_evaluation.md](docs/08_evaluation.md) |
 | 9 | Zero-shot baseline: VLM + IK, no demonstrations | [docs/09_zero_shot_vlm.md](docs/09_zero_shot_vlm.md) |
 | – | Code walkthrough (every script explained) | [docs/code_walkthrough.md](docs/code_walkthrough.md) |
