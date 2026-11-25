@@ -9,7 +9,7 @@ and comparing them against a **zero-shot baseline** that uses no demonstrations 
 **Task:** pick up a plush toy from one of 5 marked spots and place it in a cardboard box.
 **Dataset:** 50 teleoperated demonstrations, [`Yufeng1216/so101_pick_place`](https://huggingface.co/datasets/Yufeng1216/so101_pick_place).
 
-| ACT (spot 4, 50% overall) | Diffusion Policy (spot 5, 75% overall) |
+| ACT (spot ⑤, 32% overall) | Diffusion Policy (spot ②, 68% overall) |
 |---|---|
 | ![ACT rollout](assets/act_success.gif) | ![Diffusion Policy rollout](assets/diffusion_success.gif) |
 
@@ -22,21 +22,23 @@ and comparing them against a **zero-shot baseline** that uses no demonstrations 
 | **ACT** | [Zhao et al., 2023](https://arxiv.org/abs/2304.13705) | ~52 M | CVAE + Transformer, action chunking | local RTX 3070 (8 GB) |
 | **Diffusion Policy** | [Chi et al., 2023](https://arxiv.org/abs/2303.04137) | ~278 M | DDPM/DDIM denoising over action chunks | university GPU cluster (Slurm) |
 | **SmolVLA** | [Shukor et al., 2025](https://arxiv.org/abs/2506.01844) | ~450 M | small VLM + flow-matching action expert | university GPU cluster (Slurm) |
-| **π₀.₅** | [Physical Intelligence, 2025](https://arxiv.org/abs/2504.16054) | ~3 B | VLA, PaliGemma + flow-matching expert | cloud GPU (≥ 24 GB) |
+| **π₀.₅** | [Physical Intelligence, 2025](https://arxiv.org/abs/2504.16054) | ~3 B | VLA, PaliGemma + flow-matching expert | rented A100 80 GB (Hugging Face Jobs) |
 | **Zero-shot VLM + IK** (baseline) | — | ~2 B (VLM) | Qwen3-VL points at toy/box → table homography → IK → scripted grasp | no training |
 
 ## Results
 
 Every policy is evaluated on the real robot with the same protocol
-([docs/08_evaluation.md](docs/08_evaluation.md)): 5 start spots × 4 trials, 30 s each, spots in rotation.
+([docs/08_evaluation.md](docs/08_evaluation.md)): **40 trials** (5 start spots × 8), 30 s each, under the same
+lighting the demonstrations were recorded in (night, desk lamp only). Policies take turns in blocks of 5 trials, so
+slow drifts (lighting, toy wear, motor temperature) hit every policy equally.
 Success = toy released inside the box. Per-trial sheets are in [`results/`](results/).
 
-| Policy | Steps × batch | Samples seen (epochs) | Train time | Success (n=20) | 95% CI | Grasped, not placed | Not grasped | Inference / chunk | Model | Clip |
+| Policy | Steps × batch | Samples seen (epochs) | Train time | Success (n=40) | 95% CI | Grasped, not placed | Not grasped | Inference / chunk | Model | Clip |
 |---|---|---|---|---|---|---|---|---|---|---|
-| ACT | 50k × 8 | 400k (≈27) | 4.0 h, RTX 3070 Laptop | **50%** ([sheet](results/act.md)) | 30–70% | 2 | 8 | ~47 ms | [🤗](https://huggingface.co/Yufeng1216/act_so101_pick_place) | [gif](assets/act_success.gif) |
-| Diffusion Policy | 100k × 8 | 800k (≈53) | ≈4 h, Tesla V100 16 GB | **75%** ([sheet](results/diffusion.md)) | 53–89% | 1 | 4 | ~200 ms (DDIM, 10 steps) | [🤗](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) | [gif](assets/diffusion_success.gif) |
+| ACT | 50k × 8 | 400k (≈27) | 4.0 h, RTX 3070 Laptop | **32%** ([sheet](results/act.md)) | 20–48% | 1 | 26 | ~47 ms | [🤗](https://huggingface.co/Yufeng1216/act_so101_pick_place) | [gif](assets/act_success.gif) |
+| Diffusion Policy | 100k × 8 | 800k (≈53) | ≈4 h, Tesla V100 16 GB | **68%** ([sheet](results/diffusion.md)) | 52–80% | 1 | 12 | ~200 ms (DDIM, 10 steps) | [🤗](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) | [gif](assets/diffusion_success.gif) |
 | SmolVLA | 20k × 32 | 640k (≈43) | training | – | – | – | – | – | – | – |
-| π₀.₅ | – | – | – | – | – | – | – | – | – | – |
+| π₀.₅ | 3k × 32 | 96k (≈6) | training | – | – | – | – | – | – | – |
 | Zero-shot VLM + IK | 0 (no demos) | 0 | – | – | – | – | – | – | – | – |
 
 <sub>Epochs over the 15k-frame training split (90% of 16,717 frames). 95% CI: Wilson score interval.</sub>
@@ -51,17 +53,24 @@ Success = toy released inside the box. Per-trial sheets are in [`results/`](resu
 - **Training steps are not comparable across rows.** Batch sizes differ (8 vs 32), model sizes differ by ~70×
   (52 M to 3.6 B), and SmolVLA / π₀.₅ start from pretrained weights while ACT and Diffusion start from scratch.
   *Samples seen* and *train time* are listed so the budgets can be compared directly.
-- **n = 20 is small.** The 95% intervals of ACT (30–70%) and Diffusion (53–89%) overlap, and
-  Fisher's exact test gives p ≈ 0.19 for the difference. Read the ranking as a trend, not a settled result.
-  Per-spot numbers (n = 4 each) are even noisier: 1/4 has a 95% interval of 5–70%.
+- **Why 40 trials.** A first round of 20 trials per policy gave 50% vs 75%, with overlapping 95% intervals
+  and Fisher's exact test p ≈ 0.19: not enough to rank the two. With 40 trials the difference is significant
+  (p = 0.003). Per-spot numbers (n = 8 each) are still noisy: 2/8 has a 95% interval of 7–59%.
 
 **Observations so far**
 
-- **Diffusion Policy is ahead of ACT** (75% vs 50%, not yet significant at n = 20). The gap is in grasping:
-  ACT fails to pick up the toy 8/20 times, Diffusion 4/20. Once grasped, both almost always place it.
-- **Spot ⑤ is hard for both** (1/4 each), while Diffusion is 14/16 on spots ①–④. Two very different
-  models failing at the same spot suggests the data or the geometry of that spot rather than the architecture
-  (with n = 4 per spot, this is a lead to investigate, not a conclusion).
+- **Diffusion Policy beats ACT** (68% vs 32%, p = 0.003). Almost every failure of both policies is a missed
+  grasp (26/40 for ACT, 12/40 for Diffusion); once the toy is in the gripper, it nearly always reaches the box.
+- **Their weak spots are opposite.** ACT never succeeds at spots ① and ② (0/16) but does best at ④–⑤ (11/16);
+  Diffusion is 25/32 on ①–④ and 2/8 on ⑤. So the hard spot is not simply a property of the data at that spot.
+- **Lighting matters, and more for ACT.** The first round ran in afternoon daylight (bluer light: red/blue ratio
+  1.30 vs 1.58 in the demos): ACT 10/20, Diffusion 15/20 ([act](results/act_afternoon.md),
+  [diffusion](results/diffusion_afternoon.md)). That is why the protocol now fixes the lighting. In the main
+  round the colour matched, but the lamp had been moved and shadows fell on the other side of the toy;
+  ACT, trained without image augmentation, may be more sensitive to that (not tested separately).
+- **Diffusion got worse later in the session** (17/20 in the first half, 10/20 in the second, p = 0.04).
+  Camera pose and lighting stayed the same across the 40 trials, so motor heating or toy wear are candidates.
+  This test was chosen after seeing the data, so treat it as a lead, not a finding.
 - **Sampler matters for Diffusion.** The default 100-step DDPM takes ~1.5 s per action chunk on the laptop GPU,
   longer than the 1.07 s the chunk lasts, so the arm would stall; 10-step DDIM is ~10× faster with the same
   offline action error ([docs/05](docs/05_diffusion_policy.md#8-在真机上运行)).

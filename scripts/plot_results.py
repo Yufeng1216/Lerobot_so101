@@ -32,6 +32,12 @@ def read_sheet(path: Path) -> dict[str, list[bool]]:
     return per_spot
 
 
+def trials_label(sheets) -> str:
+    """'8 trials each', or a range if policies were evaluated a different number of times."""
+    counts = sorted({len(t) for _, sheet in sheets for t in sheet.values()})
+    return f"{counts[0]} trials each" if len(counts) == 1 else f"{counts[0]}-{counts[-1]} trials each"
+
+
 def main() -> None:
     sheets = [(p, read_sheet(ROOT / "results" / f"{p}.md")) for p in ORDER if (ROOT / "results" / f"{p}.md").exists()]
     W, H, left, top, bottom = 640, 310, 50, 62, 40
@@ -41,7 +47,7 @@ def main() -> None:
 
     svg = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" font-family="Helvetica, Arial, sans-serif" font-size="12">',
            f'<rect width="{W}" height="{H}" fill="white"/>',
-           f'<text x="{left}" y="18" font-size="14" font-weight="bold">Real-robot success rate per start spot (4 trials each)</text>']
+           f'<text x="{left}" y="18" font-size="14" font-weight="bold">Real-robot success rate per start spot ({trials_label(sheets)})</text>']
     for pct in (0, 25, 50, 75, 100):  # horizontal grid + y labels
         y = top + plot_h * (1 - pct / 100)
         svg.append(f'<line x1="{left}" x2="{W - 20}" y1="{y:.1f}" y2="{y:.1f}" stroke="#ddd"/>')

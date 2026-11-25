@@ -48,16 +48,17 @@
 | 🟡 部分成功 | 抓起来了，但没放进盒子（掉在外面、时间到了还拿着） |
 | ❌ 失败 | 没抓起来 |
 
-主指标是**成功率**（成功 / 20）。部分成功单独统计，用来分析失败原因（抓取问题还是放置问题）。
+主指标是**成功率**（成功 / 40）。部分成功单独统计，用来分析失败原因（抓取问题还是放置问题）。
 
-**20 次的误差很大**，报告时一起给出 95% 置信区间（Wilson 区间）。比较两个策略用 Fisher 精确检验：
+**次数少时误差很大**，报告时一起给出 95% 置信区间（Wilson 区间）。比较两个策略用 Fisher 精确检验：
 
 ```powershell
-python -c "from scipy.stats import fisher_exact; print(fisher_exact([[10,10],[15,5]])[1])"   # [[成功,失败],[成功,失败]]
+python -c "from scipy.stats import fisher_exact; print(fisher_exact([[13,27],[27,13]])[1])"   # [[成功,失败],[成功,失败]]
 ```
 
-例：10/20 的区间是 30%～70%，15/20 是 53%～89%，两者 p ≈ 0.19，只能算趋势。
-每个点位只有 4 次，单点结论更弱（1/4 的区间是 5%～70%）。
+实际例子：第一轮每个策略只测了 20 次，ACT 10/20（区间 30%～70%）、Diffusion 15/20（53%～89%），
+p ≈ 0.19，分不出高下；改成 40 次后是 13/40 vs 27/40，p = 0.003，差异显著。
+每个点位只有 8 次，单点结论仍然弱（2/8 的区间是 7%～59%）。
 
 各策略训练步数不同、batch 不同，**步数不能横向比较**；比的是"各自按标准配方训练后的真机效果"，
 同时列出看过的样本总数和训练时长，方便对照预算。
@@ -71,15 +72,15 @@ python -c "from scipy.stats import fisher_exact; print(fisher_exact([[10,10],[15
 | 1 | ① | | | |
 | 2 | ② | | | |
 | … | | | | |
-| 20 | ⑤ | | | |
+| 40 | ⑤ | | | |
 
 汇总：成功率、各点位成功率、平均用时、主要失败模式。
 
 ## 评估完：出 GIF 和图
 
 ```powershell
-# 挑一次成功的试验做 GIF（--episode 从 0 开始，记录表第 19 次就是 18）
-python scripts/make_gif.py --repo-id Yufeng1216/rollout_eval_act --episode 18 --out assets/act_success.gif
+# 挑一次成功的试验做 GIF（--episode 从 0 开始，记录表第 5 次就是 4）
+python scripts/make_gif.py --repo-id Yufeng1216/rollout_eval_act_night --episode 4 --out assets/act_success.gif
 # 从 results/*.md 重新画各点位成功率
 python scripts/plot_results.py
 ```
