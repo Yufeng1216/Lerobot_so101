@@ -139,7 +139,7 @@ Lerobot/
 │   │   ├── submit.sh      检查账号后提交任务
 │   │   └── train.sbatch   训练任务本身
 │   └── hf_jobs/train_pi05.py  把 π₀.₅ 训练提交到租用的 Hugging Face GPU
-├── zero_shot/             零样本基线（不用示范）：运动学、单应性标定、本地 VLM 指向
+├── zero_shot/             零样本基线（不用示范）：运动学、单应性标定、本地 VLM 指向、真机抓取脚本 run_grasp.py
 ├── results/               每个策略真机评估的逐次记录表
 ├── assets/                README 用的 GIF 和图
 ├── docs/                  中文教程，一个阶段一个文件

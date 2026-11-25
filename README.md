@@ -9,7 +9,7 @@ and comparing them against a **zero-shot baseline** that uses no demonstrations 
 **Task:** pick up a plush toy from one of 5 marked spots and place it in a cardboard box.
 **Dataset:** 50 teleoperated demonstrations, [`Yufeng1216/so101_pick_place`](https://huggingface.co/datasets/Yufeng1216/so101_pick_place).
 
-| ACT (spot ⑤, 32% overall) | Diffusion Policy (spot ②, 68% overall) |
+| ACT (spot ⑤) | Diffusion Policy (spot ②) |
 |---|---|
 | ![ACT rollout](assets/act_success.gif) | ![Diffusion Policy rollout](assets/diffusion_success.gif) |
 
@@ -33,12 +33,16 @@ lighting the demonstrations were recorded in (night, desk lamp only). Policies t
 slow drifts (lighting, toy wear, motor temperature) hit every policy equally.
 Success = toy released inside the box. Per-trial sheets are in [`results/`](results/).
 
-| Policy | Steps × batch | Samples seen (epochs) | Train time | Success (n=40) | 95% CI | Grasped, not placed | Not grasped | Inference / chunk | Model | Clip |
+> **Status:** only the first 10 trials per policy are valid so far. Around trial 20 of the session the arm's base
+> was knocked out of place (found afterwards from the recorded camera frames, see below); the remaining 30 trials
+> per policy are being re-run with the base clamped to the table. Numbers below are provisional.
+
+| Policy | Steps × batch | Samples seen (epochs) | Train time | Success (valid trials) | 95% CI | Grasped, not placed | Not grasped | Inference / chunk | Model | Clip |
 |---|---|---|---|---|---|---|---|---|---|---|
-| ACT | 50k × 8 | 400k (≈27) | 4.0 h, RTX 3070 Laptop | **32%** ([sheet](results/act.md)) | 20–48% | 1 | 26 | ~47 ms | [🤗](https://huggingface.co/Yufeng1216/act_so101_pick_place) | [gif](assets/act_success.gif) |
-| Diffusion Policy | 100k × 8 | 800k (≈53) | ≈4 h, Tesla V100 16 GB | **68%** ([sheet](results/diffusion.md)) | 52–80% | 1 | 12 | ~200 ms (DDIM, 10 steps) | [🤗](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) | [gif](assets/diffusion_success.gif) |
+| ACT | 50k × 8 | 400k (≈27) | 4.0 h, RTX 3070 Laptop | **4/10** ([sheet](results/act.md)) | 17–69% | 0 | 6 | ~47 ms | [🤗](https://huggingface.co/Yufeng1216/act_so101_pick_place) | [gif](assets/act_success.gif) |
+| Diffusion Policy | 100k × 8 | 800k (≈53) | ≈4 h, Tesla V100 16 GB | **9/10** ([sheet](results/diffusion.md)) | 60–98% | 0 | 1 | ~200 ms (DDIM, 10 steps) | [🤗](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) | [gif](assets/diffusion_success.gif) |
 | SmolVLA | 20k × 32 | 640k (≈43) | training | – | – | – | – | – | – | – |
-| π₀.₅ | 3k × 32 | 96k (≈6) | training | – | – | – | – | – | – | – |
+| π₀.₅ | 3k × 32 | 96k (≈6) | training (≈7 h, A100 80 GB) | – | – | – | – | – | – | – |
 | Zero-shot VLM + IK | 0 (no demos) | 0 | – | – | – | – | – | – | – | – |
 
 <sub>Epochs over the 15k-frame training split (90% of 16,717 frames). 95% CI: Wilson score interval.</sub>
@@ -54,20 +58,19 @@ Success = toy released inside the box. Per-trial sheets are in [`results/`](resu
   (52 M to 3.6 B), and SmolVLA / π₀.₅ start from pretrained weights while ACT and Diffusion start from scratch.
   *Samples seen* and *train time* are listed so the budgets can be compared directly.
 - **Why 40 trials.** With 20 trials, 50% vs 75% would still have overlapping 95% intervals (30–70% vs 53–89%,
-  Fisher's exact test p ≈ 0.19). With 40 trials the observed difference is significant (p = 0.003). Per-spot numbers (n = 8 each) are still noisy: 2/8 has a 95% interval of 7–59%.
+  Fisher's exact test p ≈ 0.19). With the 10 valid trials so far, 4/10 vs 9/10 gives p ≈ 0.06: a trend only.
 
 **Observations so far**
 
-- **Diffusion Policy beats ACT** (68% vs 32%, p = 0.003). Almost every failure of both policies is a missed
-  grasp (26/40 for ACT, 12/40 for Diffusion); once the toy is in the gripper, it nearly always reaches the box.
-- **Their weak spots are opposite.** ACT never succeeds at spots ① and ② (0/16) but does best at ④–⑤ (11/16);
-  Diffusion is 25/32 on ①–④ and 2/8 on ⑤. So the hard spot is not simply a property of the data at that spot.
-- **Shadows differed from the demos.** Light colour and camera pose matched the demonstrations, but the lamp
-  head had moved and the toy's shadow fell on the other side. ACT, trained without image augmentation,
-  may be more sensitive to that than Diffusion (not tested separately).
-- **Diffusion got worse later in the session** (17/20 in the first half, 10/20 in the second, p = 0.04).
-  Camera pose and lighting stayed the same across the 40 trials, so motor heating or toy wear are candidates.
-  This test was chosen after seeing the data, so treat it as a lead, not a finding.
+- **Diffusion Policy is ahead of ACT** (9/10 vs 4/10 in the valid trials). Every failure so far is a missed grasp;
+  once the toy is in the gripper, both policies reach the box.
+- **ACT fails at spots ①–③ and succeeds at ④–⑤** in every valid trial (0/6 vs 4/4); Diffusion misses only one
+  trial, at ⑤. With 2 trials per spot this is a lead, not a result.
+- **The setup itself has to be checked during the evaluation, not only before it.** The base of the arm moved by
+  ~0.5–1 cm partway through the session and nobody noticed at the time. It showed up afterwards: with the camera
+  fixed, the arm's image position at its rest pose stays within ~2 px across all 50 demos, but jumped by 6–13 px
+  from one block onward. All later trials were discarded. The same shift also made the zero-shot baseline
+  grasp beside the toy, since its targets are computed in the base frame.
 - **Sampler matters for Diffusion.** The default 100-step DDPM takes ~1.5 s per action chunk on the laptop GPU,
   longer than the 1.07 s the chunk lasts, so the arm would stall; 10-step DDIM is ~10× faster with the same
   offline action error ([docs/05](docs/05_diffusion_policy.md#8-在真机上运行)).
@@ -91,7 +94,7 @@ Success = toy released inside the box. Per-trial sheets are in [`results/`](resu
 config/          robot.example.json  → copy to robot.json (your COM ports, camera indices, HF user)
 scripts/         runs on the Windows laptop: hardware checks, recording, local training, deployment
 cloud/           runs elsewhere: Slurm cluster and rented Hugging Face GPUs, for models that need more than 8 GB
-zero_shot/       the no-demonstration baseline: SO-101 kinematics, pixel→table homography, local VLM pointing
+zero_shot/       the no-demonstration baseline: SO-101 kinematics, pixel→table homography, local VLM pointing, real-robot grasp script
 docs/            step-by-step tutorial, one file per stage
 results/         per-trial real-robot evaluation sheets
 assets/          README media (rollout GIFs, results chart)

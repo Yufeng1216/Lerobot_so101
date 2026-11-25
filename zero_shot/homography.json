@@ -16,12 +16,31 @@
       0.9999999999999999
     ]
   ],
+  "H_pixel_to_place": [
+    [
+      -0.0002664847985774042,
+      -0.0005680871725031631,
+      0.4253067705594838
+    ],
+    [
+      -0.0007552175998411816,
+      -6.670529493732639e-05,
+      0.29703109200759875
+    ],
+    [
+      -0.0008300994104783582,
+      0.0015143977659982477,
+      1.0
+    ]
+  ],
   "image_size": [
     640,
     480
   ],
-  "pairs": 35,
-  "inliers": 25,
-  "median_error_m": 0.0061815843047392715,
-  "note": "fitted from demo first frames (blue-blob centre) and FK at the grasp moment"
+  "grasp_pairs": 35,
+  "grasp_inliers": 25,
+  "median_error_m": 0.006181584304739246,
+  "release_pairs": 34,
+  "place_median_error_at_release_m": 0.012592412508780761,
+  "note": "toy: demo first frames (blue-blob centre) <-> FK at the grasp; place: + release frames <-> FK"
 }
