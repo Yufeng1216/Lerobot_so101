@@ -4,7 +4,7 @@
 - 采样：DDIM 10 步（`--policy.noise_scheduler_type=DDIM --policy.num_inference_steps=10`），每次推理约 200 ms
 - 协议：[docs/08_evaluation.md](../docs/08_evaluation.md)：晚上只开台灯、拉窗帘（和录示范时一样）；计划 5 个点 × 8 轮，每次最长 30 秒；
   和 ACT **按组轮流**（ACT 5 次 → Diffusion 5 次 → …），"第 k 组"是 Diffusion 自己的第 k 组
-- 录像：本地数据集 `Yufeng1216/rollout_eval_diffusion`（`data/` 下；目前前 10 条有效）
+- 录像：本地数据集 `Yufeng1216/rollout_eval_diffusion`（`data/` 下，10 条；底座偏移后的 30 条已从数据集删除）
 - 结果：✅ 成功 / 🟡 部分成功（抓起没放进） / ❌ 失败（没抓起）
 - "时长"= 录到的帧数 / 30。控制循环实际约 25 Hz（每段动作生成时会停一下），真实用时约为表中数字 × 1.17
 

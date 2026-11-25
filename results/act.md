@@ -3,7 +3,7 @@
 - 模型：`outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model`（50k 步，[Hub](https://huggingface.co/Yufeng1216/act_so101_pick_place)）
 - 协议：[docs/08_evaluation.md](../docs/08_evaluation.md)：晚上只开台灯、拉窗帘（和录示范时一样）；计划 5 个点 × 8 轮，每次最长 30 秒；
   和 Diffusion **按组轮流**（ACT 5 次 → Diffusion 5 次 → …），"第 k 组"是 ACT 自己的第 k 组
-- 录像：本地数据集 `Yufeng1216/rollout_eval_act`（`data/` 下；目前前 10 条有效）
+- 录像：本地数据集 `Yufeng1216/rollout_eval_act`（`data/` 下，10 条；底座偏移后的 30 条已从数据集删除）
 - 结果：✅ 成功 / 🟡 部分成功（抓起没放进） / ❌ 失败（没抓起）
 - "时长"是这条 episode 录了多久：成功后按 → 提前结束，所以成功试验的时长 ≈ 完成用时
 
