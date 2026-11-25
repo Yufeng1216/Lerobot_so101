@@ -53,9 +53,8 @@ Success = toy released inside the box. Per-trial sheets are in [`results/`](resu
 - **Training steps are not comparable across rows.** Batch sizes differ (8 vs 32), model sizes differ by ~70×
   (52 M to 3.6 B), and SmolVLA / π₀.₅ start from pretrained weights while ACT and Diffusion start from scratch.
   *Samples seen* and *train time* are listed so the budgets can be compared directly.
-- **Why 40 trials.** A first round of 20 trials per policy gave 50% vs 75%, with overlapping 95% intervals
-  and Fisher's exact test p ≈ 0.19: not enough to rank the two. With 40 trials the difference is significant
-  (p = 0.003). Per-spot numbers (n = 8 each) are still noisy: 2/8 has a 95% interval of 7–59%.
+- **Why 40 trials.** With 20 trials, 50% vs 75% would still have overlapping 95% intervals (30–70% vs 53–89%,
+  Fisher's exact test p ≈ 0.19). With 40 trials the observed difference is significant (p = 0.003). Per-spot numbers (n = 8 each) are still noisy: 2/8 has a 95% interval of 7–59%.
 
 **Observations so far**
 
@@ -63,11 +62,9 @@ Success = toy released inside the box. Per-trial sheets are in [`results/`](resu
   grasp (26/40 for ACT, 12/40 for Diffusion); once the toy is in the gripper, it nearly always reaches the box.
 - **Their weak spots are opposite.** ACT never succeeds at spots ① and ② (0/16) but does best at ④–⑤ (11/16);
   Diffusion is 25/32 on ①–④ and 2/8 on ⑤. So the hard spot is not simply a property of the data at that spot.
-- **Lighting matters, and more for ACT.** The first round ran in afternoon daylight (bluer light: red/blue ratio
-  1.30 vs 1.58 in the demos): ACT 10/20, Diffusion 15/20 ([act](results/act_afternoon.md),
-  [diffusion](results/diffusion_afternoon.md)). That is why the protocol now fixes the lighting. In the main
-  round the colour matched, but the lamp had been moved and shadows fell on the other side of the toy;
-  ACT, trained without image augmentation, may be more sensitive to that (not tested separately).
+- **Shadows differed from the demos.** Light colour and camera pose matched the demonstrations, but the lamp
+  head had moved and the toy's shadow fell on the other side. ACT, trained without image augmentation,
+  may be more sensitive to that than Diffusion (not tested separately).
 - **Diffusion got worse later in the session** (17/20 in the first half, 10/20 in the second, p = 0.04).
   Camera pose and lighting stayed the same across the 40 trials, so motor heating or toy wear are candidates.
   This test was chosen after seeing the data, so treat it as a lead, not a finding.

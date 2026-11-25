@@ -1,12 +1,11 @@
-# ACT 真机评估（主结果：晚上台灯，40 次，2026-11-24）
+# ACT 真机评估（40 次，2026-11-24）
 
 - 模型：`outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model`（50k 步，[Hub](https://huggingface.co/Yufeng1216/act_so101_pick_place)）
 - 协议：[docs/08_evaluation.md](../docs/08_evaluation.md)：晚上只开台灯、拉窗帘（和录示范时一样）；5 个点 × 8 轮，每次最长 30 秒；
   和 Diffusion **按组轮流**（ACT 5 次 → Diffusion 5 次 → …），"第 k 组"是 ACT 自己的第 k 组
-- 录像：本地数据集 `Yufeng1216/rollout_eval_act_night`（40 条 episode，`data/` 下）
+- 录像：本地数据集 `Yufeng1216/rollout_eval_act`（40 条 episode，`data/` 下）
 - 结果：✅ 成功 / 🟡 部分成功（抓起没放进） / ❌ 失败（没抓起）
 - "时长"是这条 episode 录了多久：成功后按 → 提前结束，所以成功试验的时长 ≈ 完成用时
-- 下午日光下的 20 次见 [act_afternoon.md](act_afternoon.md)
 
 | # | 点位 | 结果 | 时长 (s) | 备注 |
 |---|---|---|---|---|
@@ -64,5 +63,5 @@
 
 - ① ② 一次都没成功（0/16），④ ⑤ 反而最好（11/16）：和 Diffusion 的难点（⑤）正好相反。
 - 失败几乎全是"没抓起来"：瓶颈在抓取。
-- 比下午（10/20）低，但差异不显著（Fisher p = 0.26）。这次台灯的阴影方向和录示范时不同
-  （示范时玩具阴影在右下，今晚在左边），ACT 训练没有图像增强，可能对此更敏感；没有单独验证。
+- 这次台灯的阴影方向和录示范时不同
+  （示范时玩具阴影在右下，评估时在左边），ACT 训练没有图像增强，可能对此更敏感；没有单独验证。

@@ -28,8 +28,8 @@
 例如 ACT 和 Diffusion 轮流，每次一组 5 次：
 
 ```powershell
-.\scripts\robot.ps1 eval -Policy outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model -Name act_night -Episodes 5
-.\scripts\robot.ps1 eval -Policy outputs/train/diffusion_so101_pick_place/pretrained_model_ema -Name diffusion_night -Episodes 5 --policy.noise_scheduler_type=DDIM --policy.num_inference_steps=10
+.\scripts\robot.ps1 eval -Policy outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model -Name act -Episodes 5
+.\scripts\robot.ps1 eval -Policy outputs/train/diffusion_so101_pick_place/pretrained_model_ema -Name diffusion -Episodes 5 --policy.noise_scheduler_type=DDIM --policy.num_inference_steps=10
 # 再运行第一条：同名的评估数据集已存在时会自动接着录，不会覆盖
 ```
 
@@ -56,8 +56,8 @@
 python -c "from scipy.stats import fisher_exact; print(fisher_exact([[13,27],[27,13]])[1])"   # [[成功,失败],[成功,失败]]
 ```
 
-实际例子：第一轮每个策略只测了 20 次，ACT 10/20（区间 30%～70%）、Diffusion 15/20（53%～89%），
-p ≈ 0.19，分不出高下；改成 40 次后是 13/40 vs 27/40，p = 0.003，差异显著。
+为什么要 40 次：如果只测 20 次，10/20 和 15/20 的区间是 30%～70% 和 53%～89%，p ≈ 0.19，分不出高下。
+我们 40 次的结果是 13/40 vs 27/40，p = 0.003，差异显著。
 每个点位只有 8 次，单点结论仍然弱（2/8 的区间是 7%～59%）。
 
 各策略训练步数不同、batch 不同，**步数不能横向比较**；比的是"各自按标准配方训练后的真机效果"，
@@ -80,7 +80,7 @@ p ≈ 0.19，分不出高下；改成 40 次后是 13/40 vs 27/40，p = 0.003，
 
 ```powershell
 # 挑一次成功的试验做 GIF（--episode 从 0 开始，记录表第 5 次就是 4）
-python scripts/make_gif.py --repo-id Yufeng1216/rollout_eval_act_night --episode 4 --out assets/act_success.gif
+python scripts/make_gif.py --repo-id Yufeng1216/rollout_eval_act --episode 4 --out assets/act_success.gif
 # 从 results/*.md 重新画各点位成功率
 python scripts/plot_results.py
 ```

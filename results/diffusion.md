@@ -1,13 +1,12 @@
-# Diffusion Policy 真机评估（主结果：晚上台灯，40 次，2026-11-24）
+# Diffusion Policy 真机评估（40 次，2026-11-24）
 
 - 模型：`outputs/train/diffusion_so101_pick_place/pretrained_model_ema`（278M，100k 步，EMA 权重，[Hub](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place)）
 - 采样：DDIM 10 步（`--policy.noise_scheduler_type=DDIM --policy.num_inference_steps=10`），每次推理约 200 ms
 - 协议：[docs/08_evaluation.md](../docs/08_evaluation.md)：晚上只开台灯、拉窗帘（和录示范时一样）；5 个点 × 8 轮，每次最长 30 秒；
   和 ACT **按组轮流**（ACT 5 次 → Diffusion 5 次 → …），"第 k 组"是 Diffusion 自己的第 k 组
-- 录像：本地数据集 `Yufeng1216/rollout_eval_diffusion_night`（40 条 episode，`data/` 下）
+- 录像：本地数据集 `Yufeng1216/rollout_eval_diffusion`（40 条 episode，`data/` 下）
 - 结果：✅ 成功 / 🟡 部分成功（抓起没放进） / ❌ 失败（没抓起）
 - "时长"= 录到的帧数 / 30。控制循环实际约 25 Hz（每段动作生成时会停一下），真实用时约为表中数字 × 1.17
-- 下午日光下的 20 次见 [diffusion_afternoon.md](diffusion_afternoon.md)
 
 | # | 点位 | 结果 | 时长 (s) | 备注 |
 |---|---|---|---|---|

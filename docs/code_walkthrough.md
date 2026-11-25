@@ -860,7 +860,7 @@ ROW = re.compile(r"^\|\s*\d+\s*\|\s*([①②③④⑤])\s*\|\s*(✅|🟡|❌)\s*
   这里取出点位和结果两样。
 - 直接拼 SVG 文本：SVG 是用 XML 描述图形的文本格式，`<rect>` 是矩形（柱子），`<text>` 是文字。
   GitHub 能直接显示 SVG，所以不需要装 matplotlib。
-- 只读 `ORDER` 里列出的文件名（`act.md`、`diffusion.md`……），所以 `act_afternoon.md` 这类对照结果不会画进图里。
+- 只读 `ORDER` 里列出的文件名（`act.md`、`diffusion.md`……），其他名字的记录表不会画进图里。
 - `trials_label()`：标题里的"每个点测了几次"从数据里数出来，而不是写死。所有策略次数相同时写 `8 trials each`，
   不同时写成范围（比如 `4-8 trials each`），免得改了评估次数后标题和图对不上。
 
