@@ -41,7 +41,7 @@ Success = toy released inside the box. Per-trial sheets are in [`results/`](resu
 |---|---|---|---|---|---|---|---|---|---|---|
 | ACT | 50k × 8 | 400k (≈27) | 4.0 h, RTX 3070 Laptop | **4/10** ([sheet](results/act.md)) | 17–69% | 0 | 6 | ~47 ms | [🤗](https://huggingface.co/Yufeng1216/act_so101_pick_place) | [gif](assets/act_success.gif) |
 | Diffusion Policy | 100k × 8 | 800k (≈53) | ≈4 h, Tesla V100 16 GB | **9/10** ([sheet](results/diffusion.md)) | 60–98% | 0 | 1 | ~200 ms (DDIM, 10 steps) | [🤗](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) | [gif](assets/diffusion_success.gif) |
-| SmolVLA | 20k × 32 | 640k (≈43) | training | – | – | – | – | – | – | – |
+| SmolVLA | 20k × 32 | 640k (≈43) | ≈14 h, Tesla V100 16 GB | – | – | – | – | ~0.38 s (RTX 3070 Laptop) | – | – |
 | π₀.₅ | 3k × 32 | 96k (≈6) | 7.1 h, A100 80 GB (≈ $18) | – | – | – | – | – | – | – |
 | Zero-shot VLM + IK | 0 (no demos) | 0 | – | – | – | – | – | – | – | – |
 

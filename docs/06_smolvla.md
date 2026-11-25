@@ -125,12 +125,31 @@ hf auth whoami
 .\scripts\train.ps1 smolvla
 ```
 
-集群：用法见 [`cloud/README.md`](../cloud/README.md)。V100 不原生支持 bfloat16（SmolVLA 的 VLM 部分用 bf16 存），能跑但会慢一些，开始后先看日志里的 `step_s`。训练完把 `checkpoints/last/pretrained_model` 拷回笔记本。
+集群：用法见 [`cloud/README.md`](../cloud/README.md)。V100 不原生支持 bfloat16（SmolVLA 的 VLM 部分用 bf16 存），能跑但会慢一些，开始后先看日志里的 `step_s`。训练完只把部署要用的 `pretrained_model` 拷回笔记本（约 0.9 GB，不含优化器状态），在**笔记本**上运行：
+
+```powershell
+scp -r <用户名>@<集群传输节点>:~/Lerobot/outputs/train/smolvla_so101_pick_place/checkpoints/020000/pretrained_model outputs/train/smolvla_so101_pick_place/
+```
+
+### 训练结果
+
+- 2 万步训满，两次提交（第一次 8 小时超时，第二次自动续训），V100 上共约 14 小时。
+- **离线检查**：从 5 条示范里各取一帧（抓取前、抓取中、搬运中、放下时），预测 50 步动作块，和示范里记录的动作比，
+  每个关节的平均绝对误差（度；夹爪是 0–100）：
+
+| | 底座 | 大臂 | 小臂 | 腕俯仰 | 腕旋转 | 夹爪 | 平均 |
+|---|---|---|---|---|---|---|---|
+| SmolVLA 预测 | 1.4 | 3.0 | 2.7 | 1.9 | 2.3 | 0.5 | **2.0** |
+| 对照：原地不动 | 14.2 | 29.3 | 31.2 | 13.1 | 3.2 | 7.3 | 16.4 |
+
+  这些帧都在训练集里，只能证明模型加载正确、训练有效，不能说明泛化能力（同样的检查 π₀.₅ 是 1.7，见 [07_pi05.md](07_pi05.md) 第 7 节）。
+- **推理速度**：笔记本 GPU 上一个动作块约 0.38 秒（第一次 1.2 秒，含预热），显存 0.9 GB。
+  一块能执行 1.67 秒，所以可以直接在笔记本上跑真机，不用远程推理。
 
 ## 8. 在真机上运行
 
 ```powershell
-.\scripts\robot.ps1 rollout -Policy outputs/train/smolvla_so101_pick_place/checkpoints/last/pretrained_model -Duration 30
+.\scripts\robot.ps1 rollout -Policy outputs/train/smolvla_so101_pick_place/pretrained_model -Duration 30
 ```
 
 `robot.ps1` 会自动把 `config/robot.json` 里的任务描述作为语言指令传给模型。
