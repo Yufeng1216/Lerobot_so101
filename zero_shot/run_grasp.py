@@ -7,7 +7,7 @@ One attempt:
      H_pixel_to_table for the toy, H_pixel_to_place for the box)
   4. IK for: above the toy, at the toy, above the box                 (zero_shot/kinematics.py)
   5. scripted motion, open loop:
-       rest -> open gripper above toy -> straight down -> close -> straight up to PLACE_Z (11 cm)
+       rest -> open gripper above toy -> straight down -> close -> straight up to the hover height (~5 cm)
             -> lift to ~CARRY_Z (17 cm) -> across to above the box at that height (the hanging toy
             clears the box wall) -> down to PLACE_Z -> open -> rest
 
@@ -51,6 +51,7 @@ GRASP_Z = -0.008                                         # tip height at the gra
 CLOSE_EARLY = 0.0                                        # start closing this far above GRASP_Z, while still descending (m, --close-early)
 HOVER_DZ = 0.06                                          # approach from 6 cm above the toy
 PLACE_Z = 0.11                                           # demos release ~10 cm above the table
+CARRY_TILT = 0.01                                        # high up the gripper may tilt: weak pull towards vertical
 CARRY_Z = 0.17                                           # carry height: demos peak at 13.7 cm (90%: 16.6) while carrying
 WRIST_ROLL = -90.0                                       # same as at rest and in the demos
 
@@ -109,7 +110,7 @@ def plan(toy_xy, box_xy) -> list[tuple[str, np.ndarray]]:
     q_place, e = solve_grasp([*box_xy, PLACE_Z], WRIST_ROLL)
     if e > IK_TOL["place"]:
         raise ValueError(f"no IK above the box (error {e * 100:.1f} cm)")
-    q_carry, e = ik([*box_xy, CARRY_Z], q_place)
+    q_carry, e = ik([*box_xy, CARRY_Z], q_place, orient_weight=CARRY_TILT)
     if e > IK_TOL["carry"]:
         raise ValueError(f"no IK high above the box (error {e * 100:.1f} cm)")
 
@@ -122,8 +123,10 @@ def plan(toy_xy, box_xy) -> list[tuple[str, np.ndarray]]:
         return GRIP_OPEN + f * (GRIP_CLOSED - GRIP_OPEN)
     poses += [("down", g(q, grip_at(q))) for q in vertical_path(toy_xy, GRASP_Z + HOVER_DZ, GRASP_Z, q_hover, n=12)]
     poses += [("close", g(poses[-1][1], GRIP_CLOSED))]
-    poses += [("up", g(q, GRIP_CLOSED)) for q in vertical_path(toy_xy, GRASP_Z, PLACE_Z, poses[-1][1], n=12)]
-    q_lift, e = ik([*toy_xy, CARRY_Z], poses[-1][1][:5])
+    # straight up only as far as the descent came down (the toy is off the table by then); near the base the
+    # gripper cannot stay vertical much higher, and from here on the arm is in free air anyway
+    poses += [("up", g(q, GRIP_CLOSED)) for q in vertical_path(toy_xy, GRASP_Z, GRASP_Z + HOVER_DZ, poses[-1][1], n=12)]
+    q_lift, e = ik([*toy_xy, CARRY_Z], poses[-1][1][:5], orient_weight=CARRY_TILT)
     if e > IK_TOL["carry"]:
         raise ValueError(f"no IK high above the toy (error {e * 100:.1f} cm)")
     poses += [("lift", g(q_lift, GRIP_CLOSED)), ("above box", g(q_carry, GRIP_CLOSED)), ("lower", g(q_place, GRIP_CLOSED)),

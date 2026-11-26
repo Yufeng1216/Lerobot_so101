@@ -15,8 +15,8 @@
 </div>
 
 Four robot-learning policies, from a 52M-parameter Transformer to a 4.1B-parameter vision-language-action model, trained on
-the same 50 teleoperated demonstrations and evaluated the same way on a low-cost **SO-101** arm, against a **zero-shot baseline**
-that uses no demonstrations at all (an off-the-shelf VLM for perception + inverse kinematics for motion).
+the same 50 teleoperated demonstrations and evaluated the same way on a low-cost **SO-101** arm, against **training-free baselines**:
+a general vision-language model that was never trained on robot data, driving the arm through inverse kinematics.
 Everything runs end to end on real hardware: data collection → training → deployment → 40-trial evaluation per policy.
 
 **Task:** pick up a plush toy from one of 5 marked spots and put it in a cardboard box.
@@ -36,7 +36,8 @@ Everything runs end to end on real hardware: data collection → training → de
 | **Diffusion Policy** | [Chi et al., 2023](https://arxiv.org/abs/2303.04137) | 278 M | denoises a 64-step action sequence with a 1D U-Net (DDPM training, DDIM sampling) | GPU cluster, V100 16 GB |
 | **SmolVLA** | [Shukor et al., 2025](https://arxiv.org/abs/2506.01844) | 450 M | pretrained small VLM + flow-matching action expert, fine-tuned | GPU cluster, V100 16 GB |
 | **π₀.₅** | [Physical Intelligence, 2025](https://arxiv.org/abs/2504.16054) | 4.1 B | PaliGemma + flow-matching expert with joint attention, full fine-tune | rented A100 80 GB (HF Jobs) |
-| **Zero-shot VLM + IK** | — | 2 B (VLM) | Qwen3-VL points at toy and box → homography to the table → damped-least-squares IK → scripted grasp | no training |
+| **VLM pointing + scripted grasp** | — | 2 B (VLM) | Qwen3-VL points at toy and box → homography to the table → damped-least-squares IK → scripted grasp (constants measured from the demos) | no training |
+| **VLM agent + IK** (next) | — | Claude Haiku 5.5 (API) | the VLM looks at both cameras and decides every step through `move_to` / `gripper` / `done` tools; IK only turns positions into joint angles | no training |
 
 - **Same data, same test.** All learned policies use the one dataset; every policy gets 40 trials (5 spots × 8) under the lighting the demos were recorded in, each policy in one go with a cool-down in between ([protocol](docs/08_evaluation.md)).
 - **Standard recipes.** Each policy is trained with its paper / LeRobot defaults; only what the hardware forces is changed (image size, batch, steps), and every change is explained in its tutorial.
@@ -44,7 +45,7 @@ Everything runs end to end on real hardware: data collection → training → de
 
 ## Results
 
-> **Status:** ACT, Diffusion Policy and SmolVLA done; π₀.₅ (needs a rented GPU for inference) and the zero-shot baseline are next.
+> **Status:** ACT, Diffusion Policy and SmolVLA done; π₀.₅ (needs a rented GPU for inference) and the training-free VLM baselines are next.
 
 | Policy | Success | 95% CI | Grasped, not placed | Not grasped | Per spot ①②③④⑤ | Sheet |
 |---|---|---|---|---|---|---|
@@ -52,7 +53,8 @@ Everything runs end to end on real hardware: data collection → training → de
 | Diffusion Policy | **25/40** (62.5%) | 47–76% | 7 | 8 | 6 · 6 · 4 · 7 · 2 | [diffusion](results/diffusion.md) |
 | SmolVLA | **26/40** (65%) | 50–78% | 0 | 14 | 2 · 3 · 7 · 7 · 7 | [smolvla](results/smolvla.md) |
 | π₀.₅ | – | | | | | |
-| Zero-shot VLM + IK | – | | | | | |
+| VLM pointing + scripted grasp | – | | | | | |
+| VLM agent + IK | – | | | | | |
 
 <sub>Success = toy released inside the box within 30 s. 95% CI: Wilson score interval. Per spot: successes out of 8.
 Diffusion and SmolVLA are each better than ACT (Fisher's exact test p = 0.025 and 0.013); they are not distinguishable from each other (p = 1.0).</sub>
@@ -72,7 +74,7 @@ Diffusion and SmolVLA are each better than ACT (Fisher's exact test p = 0.025 an
 config/          robot.example.json → copy to robot.json (COM ports, camera indices, HF user); arm calibration
 scripts/         runs on the Windows laptop: hardware checks, recording, local training, evaluation, GIFs
 cloud/           runs elsewhere: Slurm cluster (Diffusion, SmolVLA) and Hugging Face Jobs (π₀.₅)
-zero_shot/       the no-demonstration baseline: SO-101 kinematics, pixel→table homography, VLM pointing, real-robot grasp
+zero_shot/       the training-free baselines: SO-101 kinematics, pixel→table homography, VLM pointing, real-robot grasp
 docs/            the tutorial, one file per stage (English *.md, Chinese *.zh-CN.md)
 results/         per-trial evaluation sheets
 assets/          GIFs for this page
@@ -102,7 +104,7 @@ New to the tooling? Start with [how this repo works](docs/how_this_repo_works.md
 | 6 | SmolVLA | [docs/06_smolvla.md](docs/06_smolvla.md) |
 | 7 | π₀.₅ | [docs/07_pi05.md](docs/07_pi05.md) |
 | 8 | Evaluation protocol | [docs/08_evaluation.md](docs/08_evaluation.md) |
-| 9 | Zero-shot baseline: VLM + IK | [docs/09_zero_shot_vlm.md](docs/09_zero_shot_vlm.md) |
+| 9 | Training-free baselines: VLM + IK | [docs/09_zero_shot_vlm.md](docs/09_zero_shot_vlm.md) |
 | – | Code walkthrough (every script explained) | [docs/code_walkthrough.md](docs/code_walkthrough.md) |
 
 ## Hardware

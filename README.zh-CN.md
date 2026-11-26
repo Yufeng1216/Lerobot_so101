@@ -15,7 +15,7 @@
 </div>
 
 四个机器人学习策略，从 5200 万参数的 Transformer 到 41 亿参数的视觉-语言-动作模型，用同一份 50 条遥操作示范训练，
-在低成本的 **SO-101** 机械臂上用同一套方法评估；再和一个**完全不用示范的零样本基线**对比（现成的 VLM 负责感知，逆运动学负责动作）。
+在低成本的 **SO-101** 机械臂上用同一套方法评估；再和**免训练基线**对比：一个没在机器人数据上训练过的通用视觉语言模型，通过逆运动学驱动机械臂。
 全流程都在真机上：采集数据 → 训练 → 部署 → 每个策略 40 次真机评估。
 
 **任务：** 从 5 个标记点之一抓起毛绒玩具，放进快递盒。
@@ -35,7 +35,8 @@
 | **Diffusion Policy** | [Chi et al., 2023](https://arxiv.org/abs/2303.04137) | 278 M | 用 1D U-Net 对 64 步动作序列去噪（DDPM 训练，DDIM 采样） | GPU 集群，V100 16 GB |
 | **SmolVLA** | [Shukor et al., 2025](https://arxiv.org/abs/2506.01844) | 450 M | 预训练的小型 VLM + flow matching 动作专家，微调 | GPU 集群，V100 16 GB |
 | **π₀.₅** | [Physical Intelligence, 2025](https://arxiv.org/abs/2504.16054) | 4.1 B | PaliGemma + flow matching 动作专家（联合注意力），全量微调 | 租用的 A100 80 GB（HF Jobs） |
-| **零样本 VLM + IK** | — | 2 B（VLM） | Qwen3-VL 指出玩具和盒子 → 单应性换算到桌面 → 阻尼最小二乘 IK → 固定抓取脚本 | 不训练 |
+| **VLM 指点 + 固定抓取脚本** | — | 2 B（VLM） | Qwen3-VL 指出玩具和盒子 → 单应性换算到桌面 → 阻尼最小二乘 IK → 固定抓取脚本（参数取自示范） | 不训练 |
+| **VLM 智能体 + IK**（下一步） | — | Claude Haiku 5.5（API） | VLM 看两路相机，通过 `move_to` / `gripper` / `done` 工具决定每一步；IK 只负责把位置换算成关节角 | 不训练 |
 
 - **同样的数据，同样的测试。** 所有学习型策略用同一份数据集；每个策略测 40 次（5 个点 × 8），光照和录示范时一样，一个策略连续测完、中间冷却（[评估协议](docs/08_evaluation.zh-CN.md)）。
 - **标准配方。** 每个策略都按论文 / LeRobot 的默认配置训练，只改硬件逼着改的地方（图像大小、batch、步数），每一处改动都在对应教程里说明。
@@ -43,7 +44,7 @@
 
 ## 结果
 
-> **状态：** ACT、Diffusion Policy、SmolVLA 已测完；接下来是 π₀.₅（推理要租 GPU）和零样本基线。
+> **状态：** ACT、Diffusion Policy、SmolVLA 已测完；接下来是 π₀.₅（推理要租 GPU）和免训练的 VLM 基线。
 
 | 策略 | 成功 | 95% 区间 | 抓起没放进 | 没抓起 | 各点位 ①②③④⑤ | 记录 |
 |---|---|---|---|---|---|---|
@@ -51,7 +52,8 @@
 | Diffusion Policy | **25/40**（62.5%） | 47–76% | 7 | 8 | 6 · 6 · 4 · 7 · 2 | [diffusion](results/diffusion.zh-CN.md) |
 | SmolVLA | **26/40**（65%） | 50–78% | 0 | 14 | 2 · 3 · 7 · 7 · 7 | [smolvla](results/smolvla.zh-CN.md) |
 | π₀.₅ | – | | | | | |
-| 零样本 VLM + IK | – | | | | | |
+| VLM 指点 + 固定抓取脚本 | – | | | | | |
+| VLM 智能体 + IK | – | | | | | |
 
 <sub>成功 = 30 秒内玩具放进盒子并松开。95% 区间：Wilson 区间。各点位：8 次里成功几次。
 Diffusion 和 SmolVLA 都显著好于 ACT（Fisher 精确检验 p = 0.025 和 0.013），两者之间分不出差别（p = 1.0）。</sub>
@@ -71,7 +73,7 @@ Diffusion 和 SmolVLA 都显著好于 ACT（Fisher 精确检验 p = 0.025 和 0.
 config/          robot.example.json → 复制成 robot.json（COM 口、相机编号、HF 用户名）；机械臂标定
 scripts/         在 Windows 笔记本上运行：硬件检查、录数据、本地训练、评估、做 GIF
 cloud/           在别的机器上运行：Slurm 集群（Diffusion、SmolVLA）和 Hugging Face Jobs（π₀.₅）
-zero_shot/       不用示范的基线：SO-101 运动学、像素→桌面单应性、VLM 指向、真机抓取
+zero_shot/       免训练基线：SO-101 运动学、像素→桌面单应性、VLM 指向、真机抓取
 docs/            教程，一个阶段一个文件（英文 *.md，中文 *.zh-CN.md）
 results/         逐次的评估记录表
 assets/          本页用的 GIF
@@ -101,7 +103,7 @@ assets/          本页用的 GIF
 | 6 | SmolVLA | [docs/06_smolvla.zh-CN.md](docs/06_smolvla.zh-CN.md) |
 | 7 | π₀.₅ | [docs/07_pi05.zh-CN.md](docs/07_pi05.zh-CN.md) |
 | 8 | 评估协议 | [docs/08_evaluation.zh-CN.md](docs/08_evaluation.zh-CN.md) |
-| 9 | 零样本基线：VLM + IK | [docs/09_zero_shot_vlm.zh-CN.md](docs/09_zero_shot_vlm.zh-CN.md) |
+| 9 | 免训练基线：VLM + IK | [docs/09_zero_shot_vlm.zh-CN.md](docs/09_zero_shot_vlm.zh-CN.md) |
 | – | 代码讲解（每个脚本逐段讲） | [docs/code_walkthrough.zh-CN.md](docs/code_walkthrough.zh-CN.md) |
 
 ## 硬件

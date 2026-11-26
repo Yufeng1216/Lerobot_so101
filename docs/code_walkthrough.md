@@ -982,6 +982,8 @@ pick 5 initial centres by "farthest point", then repeat "assign each point to th
 8–12 points along a vertical line, one IK per point, each seeded with the previous solution ("warm start"), so neighbouring poses are close and the path goes straight down and up.
 The result is a list of named key poses (5 joints + gripper). If any step fails a check it raises `ValueError`, the attempt is logged as skipped, and the arm doesn't move.
 
+The lift after the grasp goes straight up only to the hover height (~5 cm, where the toy is off the table); the "lift" (17 cm) and "above box" poses are then solved with `orient_weight=CARRY_TILT` (a weak pull towards vertical), because near the base the 5-joint arm can't keep the gripper vertical that high, and up there it doesn't need to.
+
 **Interpolation (`interpolate`)**: a straight line in joint space between key poses, with steps = largest joint change ÷ speed × 30 Hz,
 so no joint exceeds `--speed` (°/s) and commands never jump.
 

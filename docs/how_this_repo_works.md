@@ -141,7 +141,7 @@ Lerobot/
 │   │   ├── submit.sh      checks the account, then submits
 │   │   └── train.sbatch   the training job itself
 │   └── hf_jobs/train_pi05.py  submits π₀.₅ training to rented Hugging Face GPUs
-├── zero_shot/             the no-demo baseline: kinematics, homography calibration, local VLM pointing, real-robot grasp script run_grasp.py
+├── zero_shot/             the training-free baselines (VLM + IK): kinematics, homography calibration, local VLM pointing, real-robot grasp script run_grasp.py
 ├── results/               per-trial real-robot evaluation sheets
 ├── assets/                GIFs and charts for the README
 ├── docs/                  the tutorial, one file per stage (English and Chinese)

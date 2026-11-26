@@ -1,4 +1,4 @@
-# 09 · Zero-shot baseline: vision-language model + inverse kinematics (no demonstrations)
+# 09 · Training-free baselines: a vision-language model + inverse kinematics
 
 **English** · [简体中文](09_zero_shot_vlm.zh-CN.md)
 
@@ -10,6 +10,17 @@ The other route is **no training at all**: let a general vision-language model (
 Putting both routes on **the same task with the same evaluation protocol** answers a practical question:
 
 > How much do 50 human demos actually add over "an off-the-shelf model + geometry"? And where does each one fail?
+
+There are two variants, differing in how much the VLM decides:
+
+| | A. VLM pointing + scripted grasp (§2–8, implemented) | B. VLM agent (§9, next) |
+|---|---|---|
+| VLM | Qwen3-VL-2B, local | Claude Haiku 5.5, cloud API |
+| What the VLM decides | only where the toy and the box are | everything: where to grasp, how high to lift, the path, when to release, whether to retry |
+| What is hand-written | the whole motion script | nothing task-specific: IK + safety checks only translate "move the gripper to (x, y, z)" into joint angles |
+| Loop | open loop, one look at the start | closed loop, looks again after every move |
+
+PS: neither variant trains a model. But variant A takes several numbers from the demos (§7.1), so it is "training-free", not "demonstration-free".
 
 ## 2. Pipeline
 
@@ -161,6 +172,23 @@ Code in [`zero_shot/`](../zero_shot/); explained in [code_walkthrough.md](code_w
 
 ## 7. Known limitations (state them in the report)
 
+### 7.1 What variant A takes from the demos
+
+No model is trained, but the demos were used to calibrate and to pick constants:
+
+| Where | Taken from the demos | Kind |
+|---|---|---|
+| pixel → table mappings (both homographies) | toy pixel in the first frame + tip position by FK at the grasp / release | calibration |
+| `GRASP_Z` −0.8 cm, `PLACE_Z` 11 cm, `CARRY_Z` 17 cm | tip heights at grasp, release and while carrying | constants |
+| `REST` | mean joint angles of the demos' first frames | constant |
+| IK seeds, `WORKSPACE` | typical grasp poses; range of grasp and release points | heuristics, safety limits |
+
+Settings were also adjusted after watching real attempts (gripper opening, speed, carry height), which is tuning on the test conditions.
+A clean version would calibrate camera and arm without the demos (touch a few table points with the gripper tip and mark them in the image),
+take heights from a ruler, and freeze every setting before the 40 trials. Variant B is set up that way.
+
+### 7.2 Other limitations
+
 - **Overhead RGB only, no depth**: objects are assumed to lie on the table, grasp height is fixed. True for our task; false for stacked or raised objects.
 - **One fixed grasp**: only "straight down from above". For a soft plush toy it may be worse than a learned policy. That's exactly a comparison worth reporting.
 - **Open loop**: it doesn't look while moving, so it can't tell if the toy got bumped or slipped.
@@ -181,3 +209,30 @@ Tunable: `--open` (opening 0–100; the demos average ~39), `--close-early` (sta
 
 Evaluation is **exactly the same** as for the other policies: 5 spots × 8 = 40 trials, the same success / partial / failure criteria ([08_evaluation.md](08_evaluation.md)).
 Additionally record VLM time and motion time per attempt, and attribute failures to: wrong point / no IK solution / missed grasp / dropped while carrying / placed off target.
+
+## 9. Next: variant B, a VLM agent that makes every decision
+
+Goal: a general model that was never trained on robot data decides the whole task by itself, looking at the cameras after every move.
+
+**Why not let it output joint angles directly?** An untrained model doesn't know this arm's kinematics, so it would have to inch forward
+look-move-look for dozens of steps: a long-horizon problem that needs a very large model. With a Cartesian interface the same task takes 5–10 decisions
+(above the toy, down, close, up, over the box, release), which a small, cheap model can handle. IK plays the role of a driver here (like a car's
+steering turning "go left" into a wheel angle); it makes no task decisions. This is also how published training-free systems are built
+(Code as Policies, VoxPoser, MOKA, ReKep, Gemini Robotics-ER): the large model decides, a generic Cartesian or IK layer executes.
+
+**Tools given to the model** (nothing else):
+
+| Tool | What it does |
+|---|---|
+| `look()` | returns the overhead and wrist images and the current gripper position (x, y, z) |
+| `move_to(x, y, z)` | moves the gripper tip there, pointing down (IK + joint-speed limit + the same path checks as variant A) |
+| `gripper(opening)` | opens (0–100) or closes the gripper |
+| `done(result)` | ends the attempt |
+
+**Model:** Claude Haiku 5.5 through the Anthropic API (vision + tool use; $0.10 / $0.50 per million input / output tokens; about ten calls per attempt,
+so 40 attempts cost well under a dollar). The account and key are set up by the user (`ant auth login` or `ANTHROPIC_API_KEY`) and never written into the repo.
+
+**Plan:**
+1. Calibrate camera and arm without the demos; measure the box and toy heights with a ruler.
+2. Write the agent loop and test it offline on recorded frames (no arm).
+3. A few real attempts, then freeze the prompt and settings and run the 40-trial protocol of [08_evaluation.md](08_evaluation.md).
