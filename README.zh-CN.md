@@ -15,7 +15,7 @@
 </div>
 
 四个机器人学习策略，从 5200 万参数的 Transformer 到 41 亿参数的视觉-语言-动作模型，用同一份 50 条遥操作示范训练，
-在低成本的 **SO-101** 机械臂上用同一套方法评估；再和**免训练基线**对比：一个没在机器人数据上训练过的通用视觉语言模型，通过逆运动学驱动机械臂。
+在低成本的 **SO-101** 机械臂上用同一套方法评估；再和一个**免训练基线**对比：一个没在机器人数据上训练过的通用视觉语言模型自己决定每一步，通过逆运动学驱动机械臂。
 全流程都在真机上：采集数据 → 训练 → 部署 → 每个策略 40 次真机评估。
 
 **任务：** 从 5 个标记点之一抓起毛绒玩具，放进快递盒。
@@ -35,8 +35,7 @@
 | **Diffusion Policy** | [Chi et al., 2023](https://arxiv.org/abs/2303.04137) | 278 M | 用 1D U-Net 对 64 步动作序列去噪（DDPM 训练，DDIM 采样） | GPU 集群，V100 16 GB |
 | **SmolVLA** | [Shukor et al., 2025](https://arxiv.org/abs/2506.01844) | 450 M | 预训练的小型 VLM + flow matching 动作专家，微调 | GPU 集群，V100 16 GB |
 | **π₀.₅** | [Physical Intelligence, 2025](https://arxiv.org/abs/2504.16054) | 4.1 B | PaliGemma + flow matching 动作专家（联合注意力），全量微调 | 租用的 A100 80 GB（HF Jobs） |
-| **VLM 指点 + 固定抓取脚本** | — | 2 B（VLM） | Qwen3-VL 指出玩具和盒子 → 单应性换算到桌面 → 阻尼最小二乘 IK → 固定抓取脚本（参数取自示范） | 不训练 |
-| **VLM 智能体 + IK**（下一步） | — | Claude Haiku 5.5（API） | VLM 看两路相机，通过 `move_to` / `gripper` / `done` 工具决定每一步；IK 只负责把位置换算成关节角 | 不训练 |
+| **VLM 智能体 + IK** | — | Claude Haiku 5.5（API） | VLM 看两路相机，通过 `move_to` / `gripper` / `done` 工具决定每一步；IK 只负责把位置换算成关节角 | 不训练 |
 
 - **同样的数据，同样的测试。** 所有学习型策略用同一份数据集；每个策略测 40 次（5 个点 × 8），光照和录示范时一样，一个策略连续测完、中间冷却（[评估协议](docs/08_evaluation.zh-CN.md)）。
 - **标准配方。** 每个策略都按论文 / LeRobot 的默认配置训练，只改硬件逼着改的地方（图像大小、batch、步数），每一处改动都在对应教程里说明。
@@ -44,7 +43,7 @@
 
 ## 结果
 
-> **状态：** ACT、Diffusion Policy、SmolVLA 已测完；接下来是 π₀.₅（推理要租 GPU）和免训练的 VLM 基线。
+> **状态：** ACT、Diffusion Policy、SmolVLA 已测完；接下来是 π₀.₅（推理要租 GPU）和免训练的 VLM 智能体。
 
 | 策略 | 成功 | 95% 区间 | 抓起没放进 | 没抓起 | 各点位 ①②③④⑤ | 记录 |
 |---|---|---|---|---|---|---|
@@ -52,7 +51,6 @@
 | Diffusion Policy | **25/40**（62.5%） | 47–76% | 7 | 8 | 6 · 6 · 4 · 7 · 2 | [diffusion](results/diffusion.zh-CN.md) |
 | SmolVLA | **26/40**（65%） | 50–78% | 0 | 14 | 2 · 3 · 7 · 7 · 7 | [smolvla](results/smolvla.zh-CN.md) |
 | π₀.₅ | – | | | | | |
-| VLM 指点 + 固定抓取脚本 | – | | | | | |
 | VLM 智能体 + IK | – | | | | | |
 
 <sub>成功 = 30 秒内玩具放进盒子并松开。95% 区间：Wilson 区间。各点位：8 次里成功几次。
@@ -62,8 +60,8 @@ Diffusion 和 SmolVLA 都显著好于 ACT（Fisher 精确检验 p = 0.025 和 0.
 |---|---|---|---|---|---|
 | ACT | 50k × 8 | 400k (≈27) | 4.0 h，RTX 3070 Laptop | ~47 ms | [🤗](https://huggingface.co/Yufeng1216/act_so101_pick_place) |
 | Diffusion Policy | 100k × 8 | 800k (≈53) | ≈4 h，V100 | ~200 ms（DDIM 10 步） | [🤗](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) |
-| SmolVLA | 20k × 32 | 640k (≈43) | ≈14 h，V100 | ~0.38 s，RTX 3070 Laptop | – |
-| π₀.₅ | 3k × 32 | 96k (≈6) | 7.1 h，A100 80 GB（≈ $18） | 要 ≥ 24 GB 的 GPU | – |
+| SmolVLA | 20k × 32 | 640k (≈43) | ≈14 h，V100 | ~0.38 s，RTX 3070 Laptop | [🤗](https://huggingface.co/Yufeng1216/smolvla_so101_pick_place) |
+| π₀.₅ | 3k × 32 | 96k (≈6) | 7.1 h，A100 80 GB（≈ $18） | 要 ≥ 24 GB 的 GPU | [🤗](https://huggingface.co/Yufeng1216/pi05_so101_pick_place) |
 
 <sub>各行的步数不能直接比（batch、模型大小、有没有预训练都不同），所以列出看过的样本数和训练时长来对照预算。epoch 按 1.5 万帧的训练集计算。</sub>
 
@@ -103,7 +101,7 @@ assets/          本页用的 GIF
 | 6 | SmolVLA | [docs/06_smolvla.zh-CN.md](docs/06_smolvla.zh-CN.md) |
 | 7 | π₀.₅ | [docs/07_pi05.zh-CN.md](docs/07_pi05.zh-CN.md) |
 | 8 | 评估协议 | [docs/08_evaluation.zh-CN.md](docs/08_evaluation.zh-CN.md) |
-| 9 | 免训练基线：VLM + IK | [docs/09_zero_shot_vlm.zh-CN.md](docs/09_zero_shot_vlm.zh-CN.md) |
+| 9 | 免训练基线：VLM 智能体 + IK | [docs/09_zero_shot_vlm.zh-CN.md](docs/09_zero_shot_vlm.zh-CN.md) |
 | – | 代码讲解（每个脚本逐段讲） | [docs/code_walkthrough.zh-CN.md](docs/code_walkthrough.zh-CN.md) |
 
 ## 硬件
