@@ -50,7 +50,7 @@
 | 37 | ② | ✅ | 13.6 | block 8 |
 | 38 | ③ | ✅ | 10.9 | block 8 |
 | 39 | ④ | ✅ | 10.0 | block 8 |
-| 40 | ⑤ | ✅ | 24.1 | block 8 |
+| 40 | ⑤ | ✅ | 24.1 | block 8; → not pressed after the success, so the time is the full 30 s, not the time to finish |
 
 ## Summary (40 trials)
 

@@ -282,7 +282,8 @@ def main() -> None:
         for k in range(args.trials):
             trial = first + k
             if not dry:
-                input(f"\n[trial {trial}] place the toy, then Enter (Ctrl+C to stop) ")
+                spot = "①②③④⑤"[(trial - 1) % 5]  # evaluation order of docs/08: ①..⑤, repeated
+                input(f"\n[trial {trial}] put the toy on spot {spot}, then Enter (Ctrl+C to stop) ")
             bgr = grab_frame(cap) if cap is not None else cv2.imdecode(np.fromfile(args.image, np.uint8), cv2.IMREAD_COLOR)
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
             toy_uv, _, t1 = pointer.point(rgb, TOY_PROMPT, "toy")
