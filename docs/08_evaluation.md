@@ -1,93 +1,88 @@
-# 08 · 评估协议
+# 08 · Evaluation protocol
 
-四个策略用**同一套协议**在真机上评估，结果才能横向比较。这一页在训练第一个策略之前就定下来，
-避免"看到结果再调整标准"。
+**English** · [简体中文](08_evaluation.zh-CN.md)
 
-## 场景
+Every policy is evaluated on the real robot with **the same protocol**, otherwise results can't be compared. The criteria are fixed in advance, so nobody "adjusts the standard after seeing the results".
 
-与录数据时完全相同：相机位置、快递盒位置（胶带标记）、5 个玩具起始点、光照、任务描述。
+## 1. Scene
 
-**光照固定为晚上、只开台灯、拉上窗帘**——示范数据是在这种条件下录的（晚上 22 点，暖色灯光）。
-白天的自然光偏蓝：下午录的评估画面红/蓝比约 1.30，示范数据是 1.58。颜色变了就是分布偏移，
-而且白天光线随时间变化，不同时间测的策略没法公平比较。
-台灯的**角度**也要和录示范时一样：灯头转了，阴影会落到玩具另一侧，颜色数值却看不出来。
+Exactly as during recording: camera positions, box position (taped), the 5 toy start spots, lighting, task description.
 
-**机械臂底座要固定在桌上**（C 型夹或双面胶）。底座一动，机械臂相对相机和桌面的坐标系就变了：
-学习型策略看到的是没见过的画面，零样本基线（目标在底座坐标系里算）会抓偏。
+**Lighting: night, desk lamp only, curtains closed.** The demos were recorded like this (warm desk lamp). Daylight is bluer, and a colour change is a distribution shift;
+daylight also keeps changing, so policies tested at different times can't be compared fairly. The lamp's **angle** must match the demos too: turn the lamp head and the shadow falls on the other side of the toy.
 
-## 流程
+**The arm's base is fixed to the table** (C-clamp or double-sided tape). If the base moves, the arm's frame relative to the camera and table changes:
+learned policies see a view they never saw, and the zero-shot baseline (whose targets are computed in the base frame) grasps beside the toy.
 
-- 5 个起始点 × 每点 8 次 = **每个策略 40 次试验**（20 次的置信区间太宽，见下面"判定标准"）
-- 每次试验开始前：从臂在起始姿态，玩具放在标记点上，盒子是空的
-- 每测完一组，看一眼底座有没有移位
-- 每次最长 **30 秒**
-- 顺序：①②③④⑤ 为一组（`-Episodes 5`），**一个策略 8 组连续测完，再换下一个**
-- 换策略之间关掉扭矩、**冷却 20 分钟**，让舵机温度回到和开始时一样；冷却后重新检查灯光、相机和底座
+## 2. Procedure
 
-运行（每次试验都录成一条 episode，留作展示视频）：
+- 5 start spots × 8 each = **40 trials per policy** (why 40: see §3)
+- before every trial: follower in the start pose, toy on its mark, box empty
+- at most **30 s** per trial
+- order: ①②③④⑤ is one block (`-Episodes 5`); **a policy runs all 8 blocks in a row, then the next policy**
+- check the base before each block
+- between policies, turn torque off and **cool down for 20 minutes** so the servos are back at the starting temperature; then re-check lighting, cameras and base
 
-```powershell
-.\scripts\robot.ps1 eval -Policy <checkpoint 目录或 Hub 模型> -Name <策略名>
-```
-
-例如测 ACT，每次一组 5 次，运行 8 次；ACT 测完、冷却后再测 Diffusion：
+Run it (every trial is recorded as an episode, kept as video):
 
 ```powershell
-.\scripts\robot.ps1 eval -Policy outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model -Name act -Episodes 5
-.\scripts\robot.ps1 eval -Policy outputs/train/diffusion_so101_pick_place/pretrained_model_ema -Name diffusion -Episodes 5 --policy.noise_scheduler_type=DDIM --policy.num_inference_steps=10
-# 同名的评估数据集已存在时会自动接着录，不会覆盖
+.\scripts\robot.ps1 eval -Policy <checkpoint dir or Hub model> -Name <policy name> -Episodes 5
 ```
 
-- 背后是 `lerobot-rollout --strategy.type=episodic`：策略控制从臂做一次试验，然后进入复位阶段，
-  这时用**主臂**把从臂带回起始姿态、把玩具放到下一个点。
-- 键盘：→ 提前结束本次试验或复位；← 作废本次、重做；Esc 停止。
-- 录下的数据集叫 `Yufeng1216/rollout_eval_<策略名>`，存在 `data/` 里，不上传。
-  LeRobot 规定 rollout 录的数据集名字必须以 `rollout_` 开头。
-- 主臂和从臂都要通电（12V 电源），否则会报 `Missing motor IDs`。
-
-## 判定标准
-
-| 结果 | 定义 |
+| Policy | Command |
 |---|---|
-| ✅ 成功 | 30 秒内玩具完全进入盒子并松开 |
-| 🟡 部分成功 | 抓起来了，但没放进盒子（掉在外面、时间到了还拿着） |
-| ❌ 失败 | 没抓起来 |
+| ACT | `.\scripts\robot.ps1 eval -Policy outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model -Name act -Episodes 5` |
+| Diffusion | `.\scripts\robot.ps1 eval -Policy outputs/train/diffusion_so101_pick_place/pretrained_model_ema -Name diffusion -Episodes 5 --policy.noise_scheduler_type=DDIM --policy.num_inference_steps=10` |
+| SmolVLA | `.\scripts\robot.ps1 eval -Policy outputs/train/smolvla_so101_pick_place/pretrained_model -Name smolvla -Episodes 5` |
 
-主指标是**成功率**（成功 / 40）。部分成功单独统计，用来分析失败原因（抓取问题还是放置问题）。
+PS: if the evaluation dataset of that name already exists, recording continues in it instead of overwriting. So running the same command 8 times gives 40 trials.
 
-**次数少时误差很大**，报告时一起给出 95% 置信区间（Wilson 区间）。比较两个策略用 Fisher 精确检验：
+- Under the hood it's `lerobot-rollout --strategy.type=episodic`: the policy drives the follower for one trial, then a reset phase follows in which you bring the follower back to the start pose with the **leader** and put the toy on the next spot.
+- Keys: → end this trial or the reset early; ← discard this trial and redo it; Esc stop.
+- The recording is the dataset `Yufeng1216/rollout_eval_<policy name>` in `data/`, not uploaded. LeRobot requires rollout datasets to start with `rollout_`.
+- Both arms need power (12 V supply), otherwise you get `Missing motor IDs`.
+
+## 3. Criteria and statistics
+
+| Result | Definition |
+|---|---|
+| ✅ success | within 30 s the toy is fully inside the box and released |
+| 🟡 partial | grasped but not placed (dropped outside, or still holding it when time runs out) |
+| ❌ failure | not grasped |
+
+The main metric is the **success rate** (successes / 40). Partials are counted separately to see whether failures come from grasping or placing.
+
+**Few trials mean large uncertainty**, so every rate is reported with a 95% confidence interval (Wilson). Two policies are compared with Fisher's exact test:
 
 ```powershell
-python -c "from scipy.stats import fisher_exact; print(fisher_exact([[4,6],[9,1]])[1])"   # [[成功,失败],[成功,失败]]
+python -c "from scipy.stats import fisher_exact; print(fisher_exact([[4,6],[9,1]])[1])"   # [[success,failure],[success,failure]]
 ```
 
-为什么要 40 次：如果只测 20 次，10/20 和 15/20 的区间是 30%～70% 和 53%～89%，p ≈ 0.19，分不出高下。
-例如目前每个策略有效的只有 10 次：4/10 和 9/10，p ≈ 0.06，仍只算趋势。
-每个点位 8 次时单点结论也弱（2/8 的区间是 7%～59%）。
+Why 40? Example: with 20 trials, 10/20 vs 15/20 gives intervals of 30%–70% and 53%–89%, p ≈ 0.19: no winner.
+With 10 it is weaker still: 4/10 vs 9/10 gives p ≈ 0.06, only a trend. PS: per-spot conclusions from 8 trials are weak too (2/8 is 7%–59%), so the overall rate is what counts.
 
-各策略训练步数不同、batch 不同，**步数不能横向比较**；比的是"各自按标准配方训练后的真机效果"，
-同时列出看过的样本总数和训练时长，方便对照预算。
+PS: training steps and batch sizes differ between policies, so **steps can't be compared across rows**. What we compare is "real-robot performance when each is trained with its standard recipe", listing samples seen and training time so the budgets can be compared.
 
-## 记录表
+## 4. Sheet
 
-每个策略填一张（复制到 `results/<策略名>.md`）：
+One per policy (`results/<policy name>.md`):
 
-| # | 点位 | 结果 | 用时 (s) | 备注（失败原因） |
+| # | Spot | Result | Time (s) | Note (failure reason) |
 |---|---|---|---|---|
 | 1 | ① | | | |
 | 2 | ② | | | |
 | … | | | | |
 | 40 | ⑤ | | | |
 
-汇总：成功率、各点位成功率、平均用时、主要失败模式。
+Summary: success rate, success per spot, mean time, main failure modes.
 
-## 评估完：出 GIF 和图
+## 5. After the evaluation: GIF and chart
 
 ```powershell
-# 挑一次成功的试验做 GIF（--episode 从 0 开始，记录表第 5 次就是 4）
+# a GIF of one successful trial (--episode starts at 0, so trial 5 on the sheet is 4)
 python scripts/make_gif.py --repo-id Yufeng1216/rollout_eval_act --episode 4 --out assets/act_success.gif
-# 从 results/*.md 重新画各点位成功率
+# per-spot success chart from results/*.md
 python scripts/plot_results.py
 ```
 
-两个脚本的代码讲解见 [code_walkthrough.md](code_walkthrough.md#11-scriptsmake_gifpy)。
+Both scripts are explained in [code_walkthrough.md](code_walkthrough.md) §11–12.

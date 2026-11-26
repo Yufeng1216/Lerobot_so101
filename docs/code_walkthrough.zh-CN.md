@@ -1,0 +1,1001 @@
+# 代码讲解：从硬件识别到训练评估
+
+[English](code_walkthrough.md) · **简体中文**
+
+这篇按**项目推进的顺序**，把仓库里每一个脚本逐段讲清楚：它解决什么问题、每段代码在做什么、
+为什么这样写，以及它调用的 LeRobot 内部代码在做什么。
+
+和其他教程的分工：`00`–`08` 讲**怎么操作**；这篇讲**代码在干什么**。
+Python / PowerShell 语法在第一次出现时解释（标为 📘）。
+
+| 阶段 | 脚本 | 一句话 |
+|---|---|---|
+| 1 硬件 | [`find_hardware.py`](#1-scriptsfind_hardwarepy) | 列出串口和相机，给每个相机拍照 |
+| 1 硬件 | [`scan_motors.py`](#2-scriptsscan_motorspy) | 只读地确认 6 个舵机的 ID |
+| 2 配置 | [`env.ps1`](#3-scriptsenvps1) | 让 LeRobot 把数据、标定存进本仓库 |
+| 2 配置 | [`robot.ps1`](#4-scriptsrobotps1) | 从配置文件拼出标定 / 遥操作 / 录制 / 部署命令 |
+| 3 数据 | [`check_cameras.py`](#5-scriptscheck_cameraspy) | 录制前的相机预检查 |
+| 3 数据 | [`inspect_dataset.py`](#6-scriptsinspect_datasetpy) | 录制后的数据质量报告 |
+| 4 训练 | [`train.ps1`](#7-scriptstrainps1) | 训练入口和每个策略的参数预设 |
+| 4 训练 | [`lerobot_train_win.py`](#8-scriptslerobot_train_winpy) | 修复 Windows 上的 checkpoint 链接问题 |
+| 5 云端 | [`cloud/slurm/*`](#10-cloudslurm在-gpu-集群上训练) | 在 Linux GPU 集群上装环境、提交训练任务 |
+| 5 云端 | [`cloud/hf_jobs/train_pi05.py`](#13-cloudhf_jobstrain_pi05py) | 把 π₀.₅ 训练提交到租用的 HF GPU |
+| 6 评估 | [`make_gif.py`](#11-scriptsmake_gifpy) | 把一次评估试验剪成 README 用的 GIF |
+| 6 评估 | [`plot_results.py`](#12-scriptsplot_resultspy) | 从 `results/*.md` 画各点位成功率柱状图 |
+| 7 零样本 | [`zero_shot/*`](#14-zero_shot零样本基线) | 运动学、单应性标定、VLM 指向（不用示范训练的基线） |
+| 内部 | [LeRobot 内部做了什么](#9-lerobot-内部我们调用的命令在做什么) | 录制循环、数据集、训练循环、ACT 前向 |
+
+---
+
+## 1. `scripts/find_hardware.py`
+
+**问题：** 插上两块舵机驱动板和三个相机后，Windows 给它们分配了 COM 号和相机编号，但不告诉你哪个是哪个。
+
+### 文件开头的文档字符串
+
+```python
+"""List the serial ports and cameras this computer can see.
+...
+"""
+```
+
+📘 三引号 `"""..."""` 是 Python 的多行字符串。放在文件或函数最开头时叫 **docstring**（文档字符串），
+是给人看的说明。`python scripts/find_hardware.py --help` 会把它打印出来（见下面的 `argparse`）。
+
+### 导入
+
+```python
+from __future__ import annotations
+import argparse
+from pathlib import Path
+import cv2
+from serial.tools import list_ports
+```
+
+- 📘 `import x` 加载一个库；`from x import y` 只取其中的 `y`。
+- `from __future__ import annotations`：让类型标注（如 `-> None`）延迟解析，是写新式 Python 的习惯写法，不影响运行逻辑。
+- `argparse`：解析命令行参数（`--max-cameras 6` 这种）。
+- `Path`：处理文件路径的类，`Path("outputs") / "a.jpg"` 会自动拼成正确的路径，Windows 和 Linux 通用。
+- `cv2`：OpenCV，读相机。
+- `serial.tools.list_ports`：pyserial 自带的串口枚举工具。
+
+### 已知芯片表
+
+```python
+KNOWN_CHIPS = {
+    (0x1A86, 0x55D3): "WCH CH343 (Waveshare / Feetech bus servo board)",
+    (0x1A86, 0x7523): "WCH CH340",
+    ...
+}
+```
+
+📘 `{键: 值}` 是**字典**（dict）。这里的键是一个**元组** `(VID, PID)`。`0x1A86` 是十六进制数字。
+
+每个 USB 设备都有两个编号：**VID**（厂商号，`1A86` = 沁恒 WCH）和 **PID**（产品号）。
+COM 号会随插拔变化，但 VID:PID 是写死在芯片里的，所以用它来认板子最可靠。
+本项目的两块板正好是不同芯片（CH343 和 CH340），这就是我们区分它们的依据。
+
+### 列串口
+
+```python
+def list_serial_ports() -> None:
+    ports = sorted(list_ports.comports(), key=lambda p: p.device)
+    for p in ports:
+        chip = KNOWN_CHIPS.get((p.vid, p.pid), "unknown chip") if p.vid else "no USB VID/PID"
+        vidpid = f"{p.vid:04X}:{p.pid:04X}" if p.vid else "----:----"
+        print(f"  {p.device:<8} {vidpid}  ...")
+```
+
+- 📘 `def 名字(参数) -> 返回类型:` 定义函数。`-> None` 表示不返回值。
+- 📘 `sorted(列表, key=lambda p: p.device)`：按 `p.device`（如 `COM3`）排序。
+  `lambda p: p.device` 是一个**匿名小函数**：输入 `p`，返回 `p.device`。
+- 📘 `字典.get(键, 默认值)`：查不到键时返回默认值，而不是报错。
+- 📘 `A if 条件 else B`：一行写完的 if-else。
+- 📘 **f-string**：`f"..."` 里的 `{表达式}` 会被替换成值。`{p.vid:04X}` 表示"4 位、不足补 0、大写十六进制"；
+  `{p.device:<8}` 表示"左对齐、占 8 个字符宽"，用来把输出排成整齐的列。
+
+### 拍照
+
+```python
+def list_cameras(max_index: int, out_dir: Path) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for idx in range(max_index):
+        cap = cv2.VideoCapture(idx)
+        if not cap.isOpened():
+            cap.release()
+            continue
+        for _ in range(15):
+            ok, frame = cap.read()
+        ...
+        cap.release()
+        cv2.imwrite(str(path), frame)
+```
+
+- `mkdir(parents=True, exist_ok=True)`：建文件夹；上级不存在就一起建，已存在也不报错。
+- 📘 `for idx in range(5)`：`idx` 依次取 0、1、2、3、4。`continue` 跳过本次循环剩下的部分。
+- `cv2.VideoCapture(idx)` 按编号打开相机；OpenCV 在 Windows 上默认用 MSMF 后端，和 LeRobot 一致。
+- **为什么读 15 帧才保存**：相机刚打开时自动曝光还没稳定，前几帧常常是全黑的。
+- 📘 `for _ in range(15)`：`_` 是"我不需要这个变量"的惯用名。
+- 📘 `ok, frame = cap.read()`：函数返回两个值，分别赋给两个变量（**元组解包**）。
+- `cap.release()`：释放相机。**不释放的话，下一个程序（比如 LeRobot）就打不开这个相机。**
+
+### 入口
+
+```python
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, ...)
+    parser.add_argument("--max-cameras", type=int, default=5, help="...")
+    args = parser.parse_args()
+    list_serial_ports()
+    list_cameras(args.max_cameras, args.out)
+
+if __name__ == "__main__":
+    main()
+```
+
+- `argparse`：声明这个脚本接受哪些参数、类型、默认值。`args.max_cameras` 就是用户传入的值（`-` 会自动变成 `_`）。
+- 📘 `if __name__ == "__main__":`：只有**直接运行**这个文件时才执行 `main()`；被别的文件 `import` 时不执行。
+  在 Windows 上这一行**必不可少**：Windows 的多进程只支持 spawn 方式，每个子进程是一个全新的 Python，
+  会重新 `import` 你的脚本。不加这一行，训练时的数据加载子进程 import 脚本时又会启动一批子进程，无限套娃。
+
+---
+
+## 2. `scripts/scan_motors.py`
+
+**问题：** 舵机 ID 存在舵机自己的 EEPROM 里，换了电脑或系统也还在。所以只需要确认 6 个 ID 都对，而且**不能改动舵机的任何设置**。
+
+### 背景：舵机总线
+
+SO-101 的 6 个 Feetech STS3215 舵机**串在一根线上**（菊花链），共用一个串口。主机发出的每条指令都带一个目标 ID，
+只有 ID 匹配的舵机才回应。所以 6 个舵机必须有不同的 ID（1–6），波特率也必须和主机一致（1 Mbps）。
+这两样都存在**舵机自己的 EEPROM** 里，断电不丢，所以换电脑、换系统都不用重设。
+
+### 关节表
+
+```python
+SO101_MOTORS = {"shoulder_pan": 1, "shoulder_lift": 2, ..., "gripper": 6}
+STS3215_MODEL_NUMBER = 777
+```
+
+ID 分配和 LeRobot 源码 `lerobot/robots/so_follower/so_follower.py` 完全一致。
+`777` 是 STS3215 在型号寄存器里报告的值（和 LeRobot 的 `_model_number("sts3215")` 一致）。
+
+### 建总线
+
+```python
+def build_bus(port: str) -> SerialMotorsBus:
+    motors = {name: Motor(motor_id, "sts3215", MotorNormMode.RANGE_M100_100)
+              for name, motor_id in SO101_MOTORS.items()}
+    return SerialMotorsBus(port=port, motors=motors)
+```
+
+- 📘 `{k: v for ... in ...}` 是**字典推导式**：用一个循环一次性生成整个字典。
+- 📘 `字典.items()` 同时取出键和值：`name`、`motor_id`。
+- `SerialMotorsBus`：LeRobot 0.7.0 的舵机总线类（底层用 Rust 写的 `rustypot` 库读写串口）。
+  旧版教程里的 `FeetechMotorsBus` 在 0.7.0 已标记为弃用。
+
+### 扫描
+
+```python
+model = bus.ping(name, num_retry=2)
+if model is None:
+    print("MISSING"); continue
+pos = bus.read("Present_Position", name, normalize=False, num_retry=2)
+```
+
+- `ping` 读舵机的型号寄存器：有回应就返回型号号码，没回应返回 `None`。
+- `read("Present_Position", ..., normalize=False)`：读**原始**编码器值（0–4095 为一圈）。
+  `normalize=False` 是因为此时还没有标定文件，没法换算成 −100~100。
+- `num_retry=2`：串口偶尔丢包，失败了再试两次。
+
+### 两个"只读"的关键设计
+
+```python
+bus.connect(handshake=False)
+...
+finally:
+    bus.disconnect(disable_torque=False)
+```
+
+1. `handshake=False`：LeRobot 默认连接时会检查所有舵机，**缺一个就直接报错退出**。
+   我们想要的是"列出哪些在、哪些缺"，所以关掉握手，自己逐个 ping。
+2. `disable_torque=False`：LeRobot 默认断开时会**写入**"关闭力矩"。这是一次写操作；
+   我们承诺脚本只读，所以断开时什么都不写。
+3. 📘 `try: ... finally: ...`：不管 `try` 里是否出错，`finally` 里的代码**一定会执行**。
+   保证串口一定被关闭，否则下一个程序打不开这个 COM 口。
+
+### `--watch` 模式
+
+```python
+pos = bus.sync_read("Present_Position", names, normalize=False, num_retry=2)
+print("\r  " + ..., end="", flush=True)
+```
+
+- `sync_read`：一条指令同时读多个舵机，比逐个读快得多。
+- `"\r"`（回车符）把光标移回行首，`end=""` 不换行：新的一行数字会覆盖旧的，在终端里看起来就是"实时刷新"。
+- 📘 `except KeyboardInterrupt:`：捕获 Ctrl+C，让程序正常退出而不是打印一大段报错。
+
+我们就是用同样的思路区分主臂和从臂的：同时读两个口 15 秒，你晃主臂，记录每个关节的最大值减最小值，
+COM4 的变化合计 4545，COM3 是 0，所以 COM4 是主臂。
+
+---
+
+## 3. `scripts/env.ps1`
+
+```powershell
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$env:HF_LEROBOT_HOME = Join-Path $repoRoot "data"
+$env:HF_LEROBOT_CALIBRATION = Join-Path $repoRoot "config\calibration"
+$env:PYTHONUTF8 = "1"
+$env:HF_HUB_DISABLE_SYMLINKS_WARNING = "1"
+```
+
+- 📘 PowerShell 变量以 `$` 开头。`$PSScriptRoot` 是**当前脚本所在的文件夹**（`scripts`），
+  `Split-Path -Parent` 取它的上一级，也就是仓库根目录。这样无论你在哪个目录运行脚本，路径都对。
+- 📘 `$env:名字 = 值`：设置**环境变量**。环境变量是操作系统层面的"全局设置"，
+  当前进程和它启动的所有子进程（比如 Python）都能读到。
+- LeRobot 在 `lerobot/utils/constants.py` 里读这两个变量：
+
+```python
+HF_LEROBOT_HOME = Path(os.getenv("HF_LEROBOT_HOME", default_cache_path))
+HF_LEROBOT_CALIBRATION = Path(os.getenv("HF_LEROBOT_CALIBRATION", HF_LEROBOT_HOME / "calibration"))
+```
+
+  `os.getenv("名字", 默认值)`：有这个环境变量就用它，没有就用默认值。所以我们**不改 LeRobot 的任何代码**，
+  只设两个环境变量，就把数据和标定的位置改了。
+
+- `PYTHONUTF8 = "1"` 打开 Python 的 **UTF-8 模式**。中文 Windows 上 Python 写文本文件默认用 cp936 编码；
+  LeRobot 保存第 2 条及以后的 episode 时，会写一个临时的 ffmpeg 拼接清单（里面是视频的绝对路径），
+  没指定编码。仓库路径里有"桌面"这样的中文时，ffmpeg 读不懂这个清单，报
+  `[Errno 22] Invalid argument: ...ffconcat`。打开 UTF-8 模式后所有没指定编码的文件都按 UTF-8 写，问题消失。
+
+- 这样设置**只对当前 PowerShell 窗口有效**，关掉窗口就没了，不会影响电脑上的其他项目。
+  `robot.ps1` 和 `train.ps1` 开头都用 `. (Join-Path $PSScriptRoot "env.ps1")` 加载它。
+- 📘 开头的 `.`（点号 + 空格）叫 **dot-source**：在**当前**作用域里运行另一个脚本，
+  它设置的变量在当前脚本里继续有效。如果不加点号直接运行，变量会在那个脚本结束时消失。
+
+---
+
+## 4. `scripts/robot.ps1`
+
+**问题：** LeRobot 的命令非常长（一条录制命令有十几个参数），每次手打容易错，
+而且**标定、遥操作、录制、部署必须用完全相同的端口、ID、相机设置**，否则标定文件找不到，或者数据和部署对不上。
+
+**思路：** 硬件设置只在 `config/robot.json` 里写一次，脚本读它、拼出完整命令。
+
+### 参数声明
+
+```powershell
+param(
+    [Parameter(Mandatory = $true, Position = 0)]
+    [ValidateSet("calibrate-follower", "calibrate-leader", "teleop", "record", "rollout", "eval")]
+    [string]$Command,
+    [switch]$Cameras,
+    [int]$Episodes = 50,
+    ...
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$Extra
+)
+```
+
+- 📘 `param(...)` 声明脚本接受的参数，作用和 Python 的 `argparse` 一样。
+- `Mandatory = $true, Position = 0`：必填，并且可以不写参数名直接放在第一个位置，所以能写成 `robot.ps1 record`。
+- `ValidateSet(...)`：只允许这几个值，打错了 PowerShell 会直接提示可选项。
+- `[switch]`：开关参数，写了就是 `$true`（如 `-Cameras`），不写就是 `$false`。
+- `[int]$Episodes = 50`：整数参数，默认值 50。
+- `ValueFromRemainingArguments`：**没被上面任何参数认领的东西都收进 `$Extra`**。
+  所以 `robot.ps1 rollout ... --policy.n_action_steps=1` 里的 `--policy...` 会原样传给 LeRobot。
+
+### 读配置
+
+```powershell
+$cfg = Get-Content $configPath -Raw | ConvertFrom-Json
+```
+
+- 📘 `|` 是**管道**：把左边命令的输出交给右边。
+- `Get-Content -Raw` 读出整个文件的文本，`ConvertFrom-Json` 把 JSON 文本变成对象，
+  之后可以用 `$cfg.follower.port` 取到 `"COM3"`。
+
+### 拼相机参数
+
+```powershell
+function Get-CameraArg {
+    $parts = foreach ($p in $cfg.cameras.PSObject.Properties) {
+        $c = $p.Value
+        $s = "$($p.Name): {type: $($c.type), index_or_path: $($c.index_or_path), ...}"
+        ...
+    }
+    "{ " + ($parts -join ", ") + " }"
+}
+```
+
+- `$cfg.cameras.PSObject.Properties`：遍历 JSON 对象的每个键（`top`、`wrist`）。
+- 📘 双引号字符串里的 `$($表达式)` 会被替换成值，相当于 Python 的 f-string。
+- 📘 函数最后"裸露"的值就是返回值（PowerShell 不需要写 `return`）。
+- 结果是 LeRobot 要的格式：`{ top: {type: opencv, index_or_path: 1, ...}, wrist: {...} }`。
+  LeRobot 用 `draccus` 库把它解析成 `OpenCVCameraConfig` 对象。
+
+### 按命令组装
+
+```powershell
+switch ($Command) {
+    "teleop" {
+        $exe = "lerobot-teleoperate"
+        $argsList = $follower + $leader
+        if ($Cameras) { $argsList += @($cameraArg, "--display_data=true") }
+    }
+    "record" { ... }
+}
+```
+
+- 📘 `@(a, b)` 是数组；`+` 把两个数组拼起来；`+=` 往数组末尾追加。
+- `record` 分支里几个关键参数的原因：
+
+| 参数 | 原因 |
+|---|---|
+| `--dataset.no_stamp=true` | LeRobot 默认在数据集名后加 `_年月日_时分秒`。关掉它，名字就是固定的 `so101_pick_place`，训练命令和 `-Resume` 都能直接引用 |
+| `--dataset.streaming_encoding=true` | 边录边把画面编码成视频。否则会先存成上千张 PNG，每条结束后再统一编码，要等很久 |
+| `-Resume` 时加 `--dataset.root=...` | LeRobot 恢复录制时必须知道数据集在硬盘上的确切位置 |
+
+`rollout` 和 `eval` 都调用 `lerobot-rollout`，区别在 `--strategy.type`：
+
+| 命令 | strategy | 做什么 |
+|---|---|---|
+| `rollout` | `base` | 策略一直控制从臂，跑 `-Duration` 秒，不录数据。用来试跑 |
+| `eval` | `episodic` | 按 [08 评估协议](08_evaluation.zh-CN.md)：默认 20 次试验，每次之间有复位阶段（用主臂摆回从臂），每次录成一条 episode |
+
+`eval` 的几个细节：
+- 数据集名是 `rollout_eval_<Name>`：LeRobot 规定 rollout 录的数据集名字必须以 `rollout_` 开头，否则直接报错。
+- `-Episodes` 没写时默认 20 而不是 record 的 50：`$PSBoundParameters.ContainsKey("Episodes")` 判断用户有没有显式传这个参数。
+- `--dataset.push_to_hub=false`：评估录像只留在本地。
+- **自动接着录**：同名评估数据集已存在（有 `meta\info.json`）时，自动加 `--resume=true --dataset.root=...`。
+  这样一个策略可以分几次测完（每次 `-Episodes 5`），不用记 `-Resume`。和 `record` 不同：录示范时重名多半是失误，要明确加 `-Resume`；
+  评估时同名就是"同一组实验"。
+
+### 执行前的两道检查（只针对 record）
+
+```powershell
+if (-not $Resume -and (Test-Path $datasetDir)) { throw "..." }
+python (Join-Path $PSScriptRoot "check_cameras.py")
+if ($LASTEXITCODE -ne 0) { throw "..." }
+```
+
+**为什么需要：** 我们读了 `lerobot_record.py` 的源码，发现它的执行顺序是
+"先创建数据集文件夹 → 再连接相机和机械臂"。相机一失败，就留下一个空壳文件夹，下次同名录制会被拒绝。
+所以在调用 LeRobot **之前**先检查：文件夹已存在就停；相机打不开也停。
+
+- 📘 `throw "消息"`：抛出错误，脚本立即停止。
+- 📘 `$LASTEXITCODE`：上一个外部程序的**退出码**。约定 0 表示成功，非 0 表示失败。
+
+### 运行
+
+```powershell
+Write-Host "> $exe $($argsList -join ' ')" -ForegroundColor Cyan
+if ($DryRun) { return }
+$ErrorActionPreference = "Continue"
+& $exe @argsList
+exit $LASTEXITCODE
+```
+
+- 先用青色打印完整命令：你能看到脚本到底替你执行了什么；`-DryRun` 只打印不执行，用来检查。
+- 📘 `& $exe`：运行变量里存着的程序名。`@argsList`（**splatting**）把数组展开成一个个独立参数。
+  这样即使参数里有空格（比如任务描述），也会被当成一个整体传过去。
+- `$ErrorActionPreference = "Continue"` 的原因：Windows PowerShell 5.1 在输出被重定向时，
+  会把外部程序写到 stderr 的**每一行**（包括无害的警告）都当成错误。如果设成 `"Stop"`，
+  一句 PyTorch 的提示就会把训练停掉。
+  真正的失败仍然能通过退出码判断。
+- `exit $LASTEXITCODE`：把 LeRobot 的退出码原样传出去，调用者才知道成功与否。
+
+---
+
+## 5. `scripts/check_cameras.py`
+
+**问题：** 腕部相机的线会被机械臂扯到，偶尔打不开（`failed to set fps=30 (actual_fps=0.0)`）。
+
+```python
+cam_cfg = OpenCVCameraConfig(index_or_path=cfg["index_or_path"], fps=cfg["fps"],
+                             width=cfg["width"], height=cfg["height"], fourcc=cfg.get("fourcc"))
+for attempt in range(1, RETRIES + 1):
+    cam = OpenCVCamera(cam_cfg)
+    try:
+        cam.connect()
+        frame = cam.read()
+        return True
+    except Exception as e:
+        print(f"... attempt {attempt} failed: {e}")
+        time.sleep(1.0)
+    finally:
+        if cam.is_connected:
+            cam.disconnect()
+return False
+```
+
+- **用的是 LeRobot 自己的 `OpenCVCamera` 类**，而不是直接用 `cv2`。这样检查的路径和录制时完全一样：
+  录制时会失败的情况（比如设置 fps 失败），预检查时也一定会失败。
+- `cfg.get("fourcc")`：配置里有 `fourcc` 就用，没有就是 `None`（自动选择）。
+  `MJPG` 让相机传压缩画面，两个相机共用一个 USB hub 时不容易因为带宽不足而打不开。
+- 📘 `try / except Exception as e`：捕获错误，把错误信息存进 `e`，程序不崩溃，接着重试。
+- 📘 `[check(n, c) for n, c in cameras.items()]` 外面再套 `all(...)`：**所有**相机都通过才算通过。
+  先用列表把每个相机都检查一遍再判断，这样即使第一个失败了，第二个的结果也会打印出来。
+- `sys.exit(0 或 1)`：把结果作为退出码交给 `robot.ps1`（就是上面 `$LASTEXITCODE` 读到的值）。
+
+---
+
+## 6. `scripts/inspect_dataset.py`
+
+**问题：** 录了 50 条，不可能每条都看一遍视频。需要一个自动报告，把有问题的 episode 挑出来。
+
+### 读数据
+
+```python
+files = sorted((root / "data").rglob("*.parquet"))
+df = pd.concat((pd.read_parquet(f) for f in files), ignore_index=True)
+```
+
+- `rglob("*.parquet")`：递归找所有 parquet 文件（数据可能被分成多个 chunk 和文件）。
+- 📘 `pd`（pandas）的 **DataFrame** 就是一张表：每行一帧，每列一个字段（`action`、`episode_index`……）。
+  `pd.concat` 把多张表上下拼起来。
+
+### 逐个 episode 计算指标
+
+```python
+for ep, g in df.groupby("episode_index"):
+    a = np.stack(g["action"].values)                 # 形状 (帧数, 6)
+    speed = np.abs(np.diff(a, axis=0)).sum(axis=1)   # 形状 (帧数-1,)
+    moving = np.flatnonzero(speed > IDLE_THRESHOLD)
+    idle = (speed <= IDLE_THRESHOLD).mean()
+    start = moving[0] / fps
+    end = (len(a) - 1 - moving[-1]) / fps
+```
+
+这是整个脚本的核心，逐行拆开：
+
+1. `df.groupby("episode_index")`：按 episode 分组，`ep` 是编号，`g` 是这个 episode 的所有帧。
+2. `np.stack(...)`：parquet 里每帧的 `action` 是一个长度为 6 的数组，`stack` 把它们叠成 `(帧数, 6)` 的矩阵。
+3. `np.diff(a, axis=0)`：相邻两帧相减，得到每一帧到下一帧的动作变化量。
+4. `np.abs(...).sum(axis=1)`：6 个关节变化量的绝对值加起来，得到每一帧的"运动量"。
+   和你熟悉的 L1 范数是一回事。
+5. `speed > 0.3`：运动量超过阈值才算"在动"（0.3 是归一化单位，比传感器噪声大，比最慢的有意动作小）。
+6. `(speed <= 0.3).mean()`：布尔数组求平均 = True 的比例 = **空闲占比**。
+7. `np.flatnonzero(...)`：所有"在动"的帧的位置。第一个位置 / fps = **开头等了几秒**；
+   最后一个位置到结尾的距离 / fps = **结尾空等了几秒**。
+8. `a[:, GRIPPER].max()`：第 5 列（夹爪）的最大值 = 夹爪最多张开了多少（0 = 闭合，100 = 全开）。
+
+然后按规则打标记，比如 `idle > 0.9` 标为 `NO MOTION - delete`。
+
+### 缩略图
+
+```python
+frames[cam] = [f.to_ndarray(format="bgr24") for vf in video_files for f in av.open(str(vf)).decode(video=0)]
+picks = np.linspace(lo, hi, 6).astype(int)
+```
+
+- `av`（PyAV）解码 MP4，每一帧转成 NumPy 数组。`bgr24` 是 OpenCV 习惯的颜色顺序。
+- 📘 嵌套列表推导：先遍历每个视频文件，再遍历文件里的每一帧。
+- `np.linspace(lo, hi, 6)`：在这个 episode 的第一帧和最后一帧之间均匀取 6 个位置。
+- `np.hstack` 横着拼（6 帧一行），`np.vstack` 竖着拼（两个相机两行），再存成一张 jpg。
+
+---
+
+## 7. `scripts/train.ps1`
+
+结构和 `robot.ps1` 相同：参数 → 读配置 → 拼参数 → 运行。重点是**每个参数为什么这样设**。
+
+### 所有策略共用的参数
+
+| 参数 | 含义 | 为什么 |
+|---|---|---|
+| `--dataset.eval_split=0.1` + `--eval_steps=2000` | 留出 10% 的 episode（5 条）不参与训练，每 2000 步算一次它们的 loss | 得到验证曲线，看得出是否过拟合 |
+| `--output_dir=outputs/train/<名字>` | checkpoint 和日志存在这里 | |
+| `--policy.repo_id=Yufeng1216/<名字>` | 训练结束后模型推到 Hub 的这个仓库 | |
+| `--trackio.enable=true` | 记录 loss 曲线到本地数据库 | 用 `trackio show` 查看 |
+
+### 恢复训练
+
+```powershell
+if ($Resume) {
+    $argsList = @("--config_path=$outputDir/checkpoints/last/pretrained_model/train_config.json", "--resume=true")
+}
+```
+
+恢复时**不重新指定任何参数**：所有设置都从上次保存的 `train_config.json` 读，
+优化器状态、学习率调度、步数计数器从 `training_state/` 恢复，保证和没中断过一样。
+
+### 策略预设
+
+```powershell
+switch ($Policy) {
+    "act" {
+        if ($Steps -eq 0) { $Steps = 50000 }
+        $argsList += @("--policy.type=act", "--batch_size=8", "--steps=$Steps", "--save_freq=10000")
+    }
+    "diffusion" {
+        if ($Steps -eq 0) { $Steps = 100000 }
+        $argsList += @(
+            "--policy.type=diffusion",
+            "--policy.resize_shape=[240,320]",   # 图像缩小一半，省显存
+            "--policy.crop_ratio=0.95",          # 训练时随机裁剪 = 数据增强
+            "--policy.down_dims=[256,512,1024]", # U-Net 通道减半：默认 278M 参数在 8 GB 显存里溢出
+            "--ema.type=warmup",                 # 额外保存一份权重的滑动平均
+            "--batch_size=8", "--steps=$Steps", "--save_freq=20000"
+        )
+    }
+    "smolvla" {
+        if ($Steps -eq 0) { $Steps = 30000 }
+        $argsList += @(
+            "--policy.path=lerobot/smolvla_base",          # 从预训练权重开始微调
+            '--rename_map={\"observation.images.top\":\"observation.images.camera1\",...}',
+            "--batch_size=8", "--steps=$Steps",
+            "--policy.scheduler_decay_steps=$Steps",       # 学习率衰减和总步数对齐
+            "--save_freq=10000"
+        )
+    }
+}
+```
+
+`-Steps` 默认是 0，表示"用这个策略的推荐值"；冒烟测试时传 `-Steps 200` 覆盖它。
+每个策略一个分支。π₀.₅ 在云端训练，不在这里。
+
+- `--policy.xxx`：改策略本身的结构参数（对应 `configuration_diffusion.py` 里的字段）。
+  命令行里的列表写成 `[240,320]`，LeRobot 的配置解析器（draccus）会把它转成 Python 的元组。
+- `--ema.xxx`：训练流程的参数，不属于策略。ACT 不用 EMA，所以只在 diffusion 分支里出现。
+- diffusion 分支把 U-Net 通道减半，是为了能在 8 GB 显存上训练；本项目最终的模型是在集群上用默认大小训的（见第 10 节）。
+- 为什么这几个参数这样设，见 [05_diffusion_policy.zh-CN.md](05_diffusion_policy.zh-CN.md) 第 5 节。
+
+**smolvla 分支的两个新东西：**
+
+- `--policy.path` 和 `--policy.type` 的区别：`type` 按默认结构**新建**一个随机初始化的模型；
+  `path` 从一个已有的 checkpoint（本地目录或 Hub 上的名字）**加载**结构和权重。微调要用 `path`。
+- `--rename_map` 的值是一个 JSON 字典，里面有双引号。Windows PowerShell 5.1 把参数传给外部程序（这里是 python）时，
+  会**吃掉**参数里的普通双引号，python 收到的就变成 `{observation.images.top:...}`，解析失败。
+  写成 `\"` 后，PowerShell 原样传过去，python 再把 `\"` 解读成一个双引号。
+  整个参数用单引号 `'...'` 包起来，PowerShell 就不会去解析里面的 `$` 和反引号。
+
+---
+
+## 8. `scripts/lerobot_train_win.py`
+
+**问题：** LeRobot 每保存一次 checkpoint，会把 `checkpoints/last` 设成指向最新 checkpoint 的**符号链接**。
+Windows 普通用户没有创建符号链接的权限（`WinError 1314`），训练会在第一次保存时崩溃。
+
+### 符号链接 vs 目录联接
+
+| | 符号链接（symlink） | 目录联接（junction） |
+|---|---|---|
+| 作用 | 一个"快捷方式"，打开它就进入目标 | 同左，但只能指向文件夹 |
+| Windows 权限 | 需要管理员或开发者模式 | **普通用户就能建** |
+| 目标路径 | 可以是相对路径 | 必须是绝对路径 |
+
+对 LeRobot 来说，`last` 只需要"能当文件夹打开"，所以联接完全够用。
+
+### 代码
+
+```python
+import lerobot.common.train_utils as train_utils
+import lerobot.scripts.lerobot_train as lerobot_train
+
+def update_last_checkpoint_junction(checkpoint_dir: Path) -> None:
+    import _winapi
+    last = checkpoint_dir.parent / train_utils.LAST_CHECKPOINT_LINK
+    if last.is_junction() or last.is_symlink():
+        os.rmdir(last)
+    _winapi.CreateJunction(str(checkpoint_dir.resolve()), str(last))
+
+if sys.platform == "win32":
+    train_utils.update_last_checkpoint = update_last_checkpoint_junction
+    lerobot_train.update_last_checkpoint = update_last_checkpoint_junction
+
+if __name__ == "__main__":
+    lerobot_train.main()
+```
+
+- 这种技巧叫 **monkey patch（猴子补丁）**：程序运行时把某个模块里的函数**替换**成我们自己的版本，
+  而不修改库的源文件。好处：不用 fork LeRobot，升级 LeRobot 也不会冲突；坏处：如果 LeRobot 改了函数名，补丁就失效。
+- **为什么要替换两处**：LeRobot 原函数定义在 `train_utils` 里，而 `lerobot_train.py` 写的是
+  `from ... import update_last_checkpoint`，相当于复制了一份引用到自己的模块里。只改一处，另一处还是旧函数。
+  （我们用 `grep` 在源码里找到了所有调用它的地方。）
+- `os.rmdir(last)`：删除旧联接。对联接使用 `rmdir` **只删联接本身**，不会删掉它指向的 checkpoint。
+- `_winapi.CreateJunction`：Python 标准库里 Windows 专用的建联接函数。目标必须是绝对路径，所以用 `.resolve()`。
+- `if sys.platform == "win32"`：只在 Windows 上替换，同一份代码在 Linux 上行为和原版完全一样。
+- 最后调用 LeRobot 原本的 `main()`。命令行参数原样传给它，所以这个文件的用法和 `lerobot-train` 完全相同。
+
+### 第二个补丁：Hub 模型名里的斜杠
+
+**问题：** 微调 SmolVLA 时要写 `--policy.path=lerobot/smolvla_base`（Hub 上的模型名，格式是"用户/模型"）。
+LeRobot 把它存成了 `Path` 对象，而在 Windows 上 `str(Path("lerobot/smolvla_base"))` 会变成 `lerobot\smolvla_base`，
+Hub 不认带反斜杠的名字，报 `Repo id must use alphanumeric chars ...`。Linux 的路径分隔符本来就是 `/`，所以只有 Windows 出错。
+
+```python
+def _fix_hub_id(name_or_path):
+    name = str(name_or_path)
+    if "\\" in name and not os.path.exists(name):
+        return name.replace("\\", "/")
+    return name_or_path
+
+def hub_safe_from_pretrained(original):
+    def from_pretrained(cls, *args, **kwargs):
+        if args:
+            args = (_fix_hub_id(args[0]), *args[1:])
+        for key in ("pretrained_name_or_path", "pretrained_model_name_or_path"):
+            if key in kwargs:
+                kwargs[key] = _fix_hub_id(kwargs[key])
+        return original(cls, *args, **kwargs)
+    return classmethod(from_pretrained)
+
+for klass in (PreTrainedPolicy, DataProcessorPipeline):
+    klass.from_pretrained = hub_safe_from_pretrained(klass.__dict__["from_pretrained"].__func__)
+```
+
+- **判断规则：** 名字里有反斜杠、而且本地**不存在**这个路径，说明它是被转坏的 Hub 名字，把 `\` 换回 `/`。
+  如果是真实存在的本地文件夹（比如 `outputs\train\...\pretrained_model`），保持不变。
+- **要改两个加载器：** 一个预训练策略包括**权重**（`PreTrainedPolicy.from_pretrained` 加载）和**前后处理配置**
+  （`DataProcessorPipeline.from_pretrained` 加载，比如归一化参数）。只改前者的话，权重能加载，
+  但加载处理配置时会报同样的错，所以两个都要改。
+- 名字有时按位置传（`from_pretrained("lerobot/x")`），有时按关键字传（`from_pretrained(pretrained_model_name_or_path=...)`），
+  而且两个加载器的参数名还不一样，所以 `*args, **kwargs` 两种情况都处理。
+- 这是一个**装饰器**式的写法：`hub_safe_from_pretrained` 接收原函数，返回一个"先修名字、再调用原函数"的新函数。
+- `from_pretrained` 是 **classmethod**（类方法，第一个参数是类 `cls` 而不是实例）。
+  `klass.__dict__["from_pretrained"]` 取出的是 classmethod 对象本身，`.__func__` 是它包着的普通函数；
+  我们包一层后再用 `classmethod(...)` 包回去。
+- 只改基类就够了：SmolVLA 没有自己重写 `from_pretrained`，调用时会沿继承链找到基类上的新版本。
+
+---
+
+## 9. LeRobot 内部：我们调用的命令在做什么
+
+### `lerobot-record` 的主循环（`lerobot/scripts/lerobot_record.py`）
+
+```
+创建数据集（或 resume）→ 连接主臂 → 连接从臂和相机
+while 已录条数 < num_episodes:
+    🔊 "Recording episode N"
+    record_loop(时长 = episode_time_s):        # 每 1/30 秒一次
+        obs = robot.get_observation()         # 读从臂 6 个关节 + 两路相机
+        act = teleop.get_action()             # 读主臂 6 个关节
+        robot.send_action(act)                # 让从臂跟随
+        dataset.add_frame({obs, act, task})   # 写入当前 episode 的缓冲区
+    🔊 "Reset the environment"
+    record_loop(时长 = reset_time_s, 不写数据集)
+    if 按了 ←: 清空缓冲区，重录
+    else:      dataset.save_episode()        # 写 parquet、结束这一段视频
+上传到 Hub
+```
+
+从这里能看出几件我们教程里用到的事实：**episode 在复位结束后才保存**（所以复位时按 ← 还能丢弃）；
+最后一条没有复位阶段；复位时主臂仍然在控制从臂。
+
+### `LeRobotDataset.__getitem__`：训练时取一个样本
+
+1. 从 parquet 里取出第 i 帧的 `observation.state`、`action` 等。
+2. 按 `delta_timestamps` 取出相邻帧（ACT 要往后 100 步的 action）；超出 episode 末尾的部分用最后一帧填充，
+   并返回一个 `action_is_pad` 掩码，告诉 loss 哪些位置是填充的、不要算进去。
+3. 根据时间戳，在 MP4 里定位并解码对应的图像帧。
+4. 返回一个字典：`{"observation.images.top": 张量, ..., "action": (100, 6) 张量, ...}`。
+
+### `lerobot-train` 的训练循环（`lerobot/scripts/lerobot_train.py`）
+
+```
+读数据集元信息（stats.json）→ 按 eval_split 划分训练/验证 episode
+make_policy()           # 按 policy.type 建网络；ResNet18 加载 ImageNet 预训练权重
+make_pre_post_processors()  # 归一化（用 stats.json 的 mean/std）和反归一化
+for step in range(steps):
+    batch = next(dataloader)
+    batch = preprocessor(batch)      # 归一化，移到 GPU
+    loss, info = policy.forward(batch)
+    loss.backward(); 梯度裁剪; optimizer.step(); scheduler.step()
+    每 log_freq 步：打印 loss、grdn（梯度范数）、data_s、updt_s
+    每 eval_steps 步：在验证 episode 上算 eval_loss
+    每 save_freq 步：保存 checkpoint，更新 last
+训练结束：push_to_hub
+```
+
+日志里的 `data_s` 是等数据的时间，`updt_s` 是 GPU 前向反向的时间（都是两次日志之间的平均值）。
+前 100 步的 `data_s` 会偏大，因为 worker 进程的启动时间（Windows 上每个约 19 秒）也被算进了平均值；
+稳定后每个 batch 只要约 0.06 秒（torchcodec 解码、4 个进程实测），瓶颈在 GPU。
+
+### ACT 的 `forward`（`lerobot/policies/act/modeling_act.py`）
+
+```
+训练时：
+  VAE 编码器输入 [CLS, 关节状态, 100 步真实动作] → 取 CLS 输出 → μ, log σ² → 采样 z（32 维）
+推理时：
+  z = 0
+共同部分：
+  每张图 → ResNet18 → 512×15×20 特征图 → 300 个 token（加 2D 正弦位置编码）
+  编码器输入 = [z 的 token, 关节状态 token, top 的 300 个 token, wrist 的 300 个 token]
+  Transformer 编码器（4 层）→ Transformer 解码器（1 层，100 个可学习 query）→ Linear → (100, 6)
+loss = L1(预测动作, 真实动作，忽略 action_is_pad 的位置) + 10 × KL(q(z) ‖ N(0, I))
+```
+
+日志里的 `l1_loss` 和 `kld_loss` 就是这两项。
+
+---
+
+## 10. `cloud/slurm/`：在 GPU 集群上训练
+
+这几个文件是 **bash 脚本**，在 Linux 集群上运行，不在 Windows 上运行。用法见 [cloud/README.zh-CN.md](../cloud/README.zh-CN.md)。
+分工：`setup_env.sh` 装一次环境；`submit.sh` 读个人设置、检查账号、提交；`train.sbatch` 是任务本身。
+
+### 个人设置和代码分开：`site.env`
+
+```bash
+ACCOUNT=...                  # 计费账号
+PARTITION=gpu                # GPU 分区
+TIME=08:00:00                # 不能超过账号允许的最长时间
+ALLOWED_ACCOUNT_PREFIX=...   # 只允许以它开头的账号
+```
+
+账号名因人而异，所以真实的 `site.env` 被 `.gitignore` 排除，仓库里只放模板 `site.env.example`，
+和 `config/robot.json` / `robot.example.json` 是同一个思路。
+
+### `setup_env.sh`
+
+```bash
+set -euo pipefail
+```
+
+bash 的"安全模式"：`-e` 任何命令失败就停；`-u` 用到未定义的变量就报错；`-o pipefail` 管道里任何一段失败都算失败。
+
+```bash
+if [ ! -x "$CONDA_DIR/bin/conda" ]; then ... fi
+```
+
+`~/miniforge3/bin/conda` 不存在（`!` 取反，`-x` 表示"存在且可执行"）才安装 Miniforge。所以脚本**可以重复运行**，装过的会跳过。
+
+安装的版本和笔记本对齐（Python 3.12、LeRobot 0.7.0、torch 2.11），另外有三处 Linux 特有的处理，脚本注释里写了原因：
+
+| 处理 | 原因 |
+|---|---|
+| PyTorch 用 **CUDA 12.6** 版（`cu126`） | CUDA 12.8 版不再包含 V100（计算能力 7.0）的 GPU 程序，会报 `no kernel image is available` |
+| 卸掉 torchcodec，训练时用 `--dataset.video_backend=pyav` | torchcodec 的 Linux 安装包是给 CUDA 13 编译的，和 cu126 的 PyTorch 配不上 |
+| 装 conda 的 `libstdcxx-ng`，并把 `$CONDA_PREFIX/lib` 放到 `LD_LIBRARY_PATH` 最前面 | 否则程序会先加载集群系统里较旧的 C++ 运行库，导入 `sqlite3` 时报 `CXXABI_1.3.15 not found` |
+
+### `submit.sh`
+
+```bash
+POLICY="${1:?usage: ...}"
+```
+
+`$1` 是命令行的第一个参数（如 `diffusion`）。`${1:?提示}` 表示"没传就打印提示并退出"。
+
+```bash
+case "$ACCOUNT" in
+    "$ALLOWED_ACCOUNT_PREFIX"*) ;;
+    *) echo "ERROR: ..." >&2; exit 1 ;;
+esac
+```
+
+bash 的模式匹配：账号以允许的前缀开头（`*` 表示后面可以是任何字符）就放行，否则报错退出（`>&2` 表示写到错误输出）。
+有多个计费账号、但只有一个能用于本项目时，这一步防止填错。
+
+```bash
+sbatch --account="$ACCOUNT" --partition="$PARTITION" --time="$TIME" --job-name="$POLICY" train.sbatch "$POLICY"
+```
+
+把个人设置作为命令行参数交给 `sbatch`，所以 `train.sbatch` 里不需要写任何账号信息。
+
+### `train.sbatch`
+
+```bash
+#SBATCH --gpus=1
+#SBATCH --cpus-per-task=8
+#SBATCH --output=logs/%x_%j.log
+```
+
+对 bash 是注释，对 Slurm 是**资源申请**：1 块 GPU、8 个 CPU 核（给数据加载进程用），日志写到 `logs/任务名_任务编号.log`。
+
+任务开始时**再检查一次账号**（`SLURM_JOB_ACCOUNT` 是 Slurm 自动设置的环境变量），双保险。
+
+```bash
+if [ -d "$OUT/checkpoints/last" ]; then
+    srun lerobot-train --config_path=.../train_config.json --resume=true
+    exit
+fi
+```
+
+集群任务有时长上限。超时被停后再提交一次，这里发现已有 checkpoint，就接着训，和 `train.ps1 -Resume` 一样。
+
+```bash
+COMMON=( --dataset.repo_id=... --eval_steps=2000 ... )
+case "$POLICY" in
+    diffusion) PRESET=( --policy.type=diffusion ... ) ;;
+    smolvla)   PRESET=( --policy.path=lerobot/smolvla_base '--rename_map={...}' --batch_size=32 ... ) ;;
+esac
+srun lerobot-train "${COMMON[@]}" "${PRESET[@]}"
+```
+
+和 `train.ps1` 一样分成"所有策略共用的参数"和"每个策略的预设"。`( ... )` 是 bash 数组，`"${COMMON[@]}"` 把数组展开成一个个参数。
+集群上的 diffusion 预设和笔记本的唯一区别是**不减半 U-Net 通道数**：V100 有 16 GB 显存，能放下论文默认的 278M 参数。
+smolvla 预设和笔记本的区别是 batch 从 8 提到 32、步数从 3 万降到 2 万，每 5000 步存一次。V100 跑 bf16 很慢（实测 2.47 s/步），2 万步约 14 小时，要分两个 8 小时任务：第一个超时后再提交一次，从最近的 checkpoint 续训，最多损失 5000 步之内的进度。
+`rename_map` 整个参数用单引号包住：bash 里单引号内的 `"` 原样传给程序（PowerShell 5.1 里则要写成 `\"`，见第 7 节）。
+
+> `.sh` 和 `.sbatch` 必须用 Linux 换行符（LF），否则 bash 会报 `$'\r': command not found`。
+> `.gitattributes` 里的 `*.sh text eol=lf` 保证了这一点。
+
+## 11. `scripts/make_gif.py`
+
+**问题：** README 里要放机器人实际运行的动图。评估录下的视频在数据集里，但 LeRobot 把很多条 episode
+接在**同一个 MP4** 里，每台相机一个文件，不能直接拿来用。
+
+### 找到这条 episode 在视频里的哪一段
+
+```python
+row = meta[meta["episode_index"] == episode].iloc[0]
+key = f"videos/observation.images.{camera}"
+path = ds / "videos" / ... / f"file-{file:03d}.mp4"
+return path, row[f"{key}/from_timestamp"], row[f"{key}/to_timestamp"]
+```
+
+数据集的 `meta/episodes/*.parquet` 是一张表，每条 episode 一行，记着它在哪个视频文件、从第几秒到第几秒。
+
+### 用 ffmpeg 剪辑、拼接、转 GIF
+
+```python
+inputs += ["-ss", start, "-to", end, "-i", path]            # 每台相机各剪一段
+labels.append(f"[{i}:v]setpts=PTS/{speed},fps={fps},scale=-2:{height}[v{i}]")
+graph = ";".join(labels) + ";[v0][v1]hstack=inputs=2,split[a][b];[a]palettegen[p];[b][p]paletteuse"
+```
+
+| 滤镜 | 作用 |
+|---|---|
+| `setpts=PTS/2` | 时间戳除以 2，即 2 倍速播放 |
+| `fps=10` | 降到每秒 10 帧（GIF 帧越多文件越大） |
+| `scale=-2:240` | 高度缩到 240，宽度按比例（`-2` 表示保持偶数） |
+| `hstack` | 两台相机左右拼成一张 |
+| `palettegen` + `paletteuse` | GIF 只能有 256 色。先从整段视频统计出最合适的调色板，再用它转换，色带少很多 |
+
+- 📘 `filter_complex` 是 ffmpeg 的滤镜图：`[0:v]` 是第 1 个输入的视频，`[v0]` 这类是自己起的中间结果名字，用 `;` 分隔每一步。
+- 📘 `subprocess.run([...], check=True)`：从 Python 里运行一个外部程序，`check=True` 表示它失败就抛异常。
+- 两个 GIF 各约 3 MB。
+
+## 12. `scripts/plot_results.py`
+
+**问题：** 每个策略评估完都要更新 README 的图。手工画容易和记录表对不上。
+
+**思路：** 只从 `results/<策略>.md` 的记录表读数据，生成 `assets/results.svg`。以后每评估完一个策略，重新运行一次即可。
+
+```python
+ROW = re.compile(r"^\|\s*\d+\s*\|\s*([①②③④⑤])\s*\|\s*(✅|🟡|❌)\s*\|")
+```
+
+- 📘 正则表达式：匹配 `| 12 | ② | ✅ |` 这种行。`\d+` 是数字，`\s*` 是任意空格，`( ... )` 是要取出的部分，
+  这里取出点位和结果两样。
+- 直接拼 SVG 文本：SVG 是用 XML 描述图形的文本格式，`<rect>` 是矩形（柱子），`<text>` 是文字。
+  GitHub 能直接显示 SVG，所以不需要装 matplotlib。
+- 只读 `ORDER` 里列出的文件名（`act.md`、`diffusion.md`……），其他名字的记录表不会画进图里。
+- `trials_label()`：标题里的"每个点测了几次"从数据里数出来，而不是写死。所有策略次数相同时写 `8 trials each`，
+  不同时写成范围（比如 `4-8 trials each`），免得改了评估次数后标题和图对不上。
+
+## 13. `cloud/hf_jobs/train_pi05.py`
+
+**问题：** π₀.₅ 有 41 亿个可训练参数，float32 全量微调要约 67 GB 显存，笔记本和集群的 V100 都放不下，只能租 Hugging Face 的 A100。
+
+**LeRobot 自带远程训练：** 训练命令加 `--job.target=a100-large`，`lerobot-train` 不在本机训练，而是：
+1. 在本机解析配置、确认数据集在 Hub 上；
+2. 把配置写成 `train_config.json`，上传到一个新的私有模型仓库；
+3. 在 HF 上启动一个任务，用官方镜像运行 `lerobot-train --config_path=<那个仓库>`；
+4. 训完把模型推到这个仓库。
+
+### 为什么用 Python 拼参数
+
+```python
+f"--rename_map={json.dumps(RENAME)}"
+```
+
+`rename_map` 是 JSON，PowerShell 5.1 会吃掉其中的引号（第 7 节）。在 Python 里拼好 `sys.argv` 再调用 `lerobot_train.main()`，没有引号问题。
+
+### 修 Windows 路径
+
+```python
+def build(cfg, repo_id, dest, tags=None):
+    path = original(cfg, repo_id, dest, tags=tags)
+    ...parent[key] = parent[key].replace("\\", "/")
+hf_jobs.build_remote_config_file = _fix_windows_paths(hf_jobs.build_remote_config_file)
+```
+
+LeRobot 把 `--policy.path` 存成 `Path`，Windows 上写进 JSON 变成 `lerobot\pi05_base`。远程是 Linux，读不懂，
+任务一开始就会失败。这里包住生成配置的函数，写完文件后把 `pretrained_path` 和 `output_dir` 里的 `\` 换回 `/`。
+和第 8 节的补丁是同一个问题，只是发生在"把配置发给别的机器"这一步。
+
+### `--dry-run`
+
+把提交函数换成"只打印配置"，不花钱就能检查发出去的 JSON。每次改参数后先 dry run。
+
+### 关键参数
+
+| 参数 | 值 | 原因 |
+|---|---|---|
+| `steps` / `scheduler_decay_steps` | 3000 / 3000 | 默认 3 万步约 70 小时（$175）。只改步数，学习率曲线按新步数完整走完；其余全用默认 |
+| `gradient_checkpointing` | true | 不存中间结果、反向时重算，用时间换显存；结果在数学上不变 |
+| `num_workers` | 10 | 测速时默认 4 个进程，GPU 每步要等 1.3 s 数据；机器有 12 个 CPU |
+| `save_freq` | = steps | 带优化器状态的完整 checkpoint 约 66 GB，只在最后存一次 |
+| `eval_steps` | 0 | 付费 GPU 上不做验证集评估 |
+| `--job.timeout` | 9h | 预计 7.3 小时，留余量；它不包括排队时间 |
+
+---
+
+## 14. `zero_shot/`：零样本基线
+
+设计和结果见 [09_zero_shot_vlm.zh-CN.md](09_zero_shot_vlm.zh-CN.md)。这里讲代码。运行方式都是 `python -m zero_shot.<文件名>`
+（从仓库根目录运行，`-m` 让 Python 把 `zero_shot` 当成一个包，文件之间可以互相 import）。
+
+### `kinematics.py`：正 / 逆运动学
+
+**读 URDF：** URDF 是描述机器人的 XML。每个 `<joint>` 有父连杆、子连杆、`<origin xyz rpy>`（关节在父连杆坐标系里的位置和朝向）
+和 `<axis>`（转轴）。从夹爪尖往回找父连杆，一直找到底座，就得到 6 个关节组成的链。
+
+**正运动学（FK）：** 从底座开始，依次乘上每个关节的"固定偏移 × 绕转轴旋转 q"两个 4×4 矩阵，
+最后得到夹爪尖在底座坐标系里的位置和朝向：
+
+```python
+for j in CHAIN:
+    T = T @ j.origin                      # 固定偏移（来自 URDF 的 xyz / rpy）
+    if j.movable:
+        R[:3, :3] = _axis_angle(j.axis, angles[j.name])   # 绕转轴旋转关节角（罗德里格斯公式）
+        T = T @ R
+```
+
+**逆运动学（IK）：** 给定目标点，反过来求关节角。没有解析公式，就迭代：
+
+```python
+r = residual(q)                 # [位置误差 (m) 3 维, 0.05 × (夹爪朝向 − 竖直向下) 3 维]
+J[:, k] = (residual(q + dq) - r) / 0.01         # 数值雅可比：每个关节动 0.01°，残差变多少
+step = J.T @ solve(J @ J.T + λ² I, -r)          # 阻尼最小二乘（DLS）
+```
+
+- 📘 **雅可比矩阵** J：残差对每个关节角的导数。牛顿法会直接用 J 的逆，但手臂伸直或到了限位附近 J 接近奇异，
+  步子会大得离谱。加 λ²I（阻尼）后步子始终有界，这就是 DLS（也叫 Levenberg–Marquardt）。
+- **λ 的大小和单位有关**：关节转 1°，夹爪尖只动约 3 mm，J 的元素约 3e-3。所以 λ 要取 1e-3 这个量级；λ 太大（比如 0.05）的话 λ² 比 JJᵀ 大几十倍，每步几乎不动。
+  取 1e-3 时几十次迭代就收敛到 0.1 mm。
+- **为什么只用 4 个关节**：wrist_roll 只让夹爪绕自己的轴转，不改变夹爪尖的位置和朝下的方向，固定不动。
+- **初值很重要**（`solve_grasp`）：从收拢姿态出发，shoulder_lift 正好在 −100° 限位上，第一步就被裁剪回限位，卡死。
+  所以用示范里典型的抓取姿态做初值（试 4 个，取误差最小的），shoulder_pan 直接用目标的方位角估计。
+
+### `check_fk.py`：不用机器人验证 FK
+
+找每条示范"夹爪先张开、再合上"的那一帧（`grasp_frame`），算这时的夹爪尖位置。
+桌面抓取的高度应该处处相同，位置应该聚成 5 簇（5 个起始点）。聚类用手写的 k-means（`kmeans`）：
+先用"最远点"选 5 个初始中心，再反复"把点分给最近的中心 → 中心挪到各簇的平均位置"。
+
+### `calibrate_from_demos.py`：单应性矩阵
+
+- `toy_pixel`：把图像转到 HSV 颜色空间，取色相 100–130（蓝色）、饱和度高的像素，开运算去掉噪点，取最大连通块的中心。
+- 📘 **单应性矩阵** H（3×3）：同一个平面在两个视角之间的映射，`[x, y, 1] ∝ H [u, v, 1]`。
+  俯视相机拍的桌面和机械臂坐标系里的桌面是同一个平面，所以一个 H 就能把像素换成桌面坐标，不需要深度。
+- `cv2.findHomography(..., cv2.RANSAC, 0.015)`：RANSAC 反复随机挑 4 组点求 H，保留"误差小于 1.5 cm 的点最多"的那个，
+  抓取检测错了或者颜色识别偏了的点会被当成外点丢掉。
+- **第二个映射 `H_pixel_to_place`（给盒子用）**：只用桌面抓取点拟合的 H，在那块 10×10 cm 区域里准（0.6 cm），
+  但到了盒子那边差 24 cm。单应性矩阵的第三行（透视项）只在数据覆盖的地方被约束住，离得越远误差放大得越厉害。
+  所以再从示范里找"松手"那一帧：`frame_at` 用 PyAV 解码数据集 MP4 里指定的帧（先 seek 到前 1 秒，再逐帧解码到目标时间），
+  取画面里玩具的位置和 FK 算的夹爪位置配对，和抓取点一起拟合。两片相距 15 cm 的点把映射"两头钉住"，盒子处误差 1.3 cm。
+
+### `pointing.py` 和 `eval_pointing.py`：VLM 指向
+
+- 提示词要求模型只回答 JSON：`[{"point_2d": [x, y], "label": "toy"}]`。`parse_point` 用正则抠出 `[...]` 再 `json.loads`，
+  也兼容模型改答 `bbox_2d`（取框的中心）。
+- Qwen3-VL 的坐标是 **0–1000 的相对值**，`x / 1000 * 宽度` 才是像素。
+- `do_sample=False`：贪心解码，同一张图每次答案相同，评估可复现。
+- `eval_pointing.py` 把 VLM 的点和颜色检测的玩具中心比较，再用 H 换算成桌面上的厘米误差。
+
+### `run_grasp.py`：真机执行
+
+**规划（`plan`）**：先求抓取姿态（`solve_grasp`），再以它为初值求上方悬停姿态；下降和抬起用 `vertical_path`
+沿竖直线取 8–12 个点、每个点做一次 IK，并用上一个点的解当初值（"热启动"），所以相邻姿态很接近、路径是直上直下。
+最后得到一串命名的关键姿态（5 个关节 + 夹爪）。任何一步不满足就抛 `ValueError`，这次试验记为 skipped，机械臂不动。
+
+**插值（`interpolate`）**：两个关键姿态之间在关节空间走直线，步数 = 最大关节角变化 ÷ 速度 × 30 Hz，
+所以每个关节都不超过 `--speed`（°/s），指令也不会跳变。
+
+**动之前的路径检查（`check_paths`）**：把每一个插值出来的指令都算一遍 FK，夹爪尖低于 `MIN_Z` 就拒绝；
+"平移到盒子上方"这一段要求不低于 `CARRY_MIN_Z`（9 cm），免得挂着的玩具撞到盒壁。
+
+**连机械臂（`Arm`）**：直接用 LeRobot 的 `SO101Follower`，和学习型策略走同一套标定文件和底层接口。
+`move` 每 1/30 秒发一次 `send_action`；`close` 先慢慢回到起始姿态再断开。断开时 LeRobot 默认会关掉扭矩，
+如果在半空断开机械臂会掉下来，所以 Ctrl+C（`KeyboardInterrupt`）也走这条路。
+
+**诊断（`report`、`snapshot`）**：下降到底和闭合后读一次舵机实际角度，打印"指令 vs 实测"的夹爪尖高度并写进 CSV；
+同时存俯视 + 腕部照片。Example：如果实测高度对、夹爪却合到了 1（两指间是空的），说明是水平位置偏了。
+
+**命令行参数改全局常量**：`--open` 等要影响 `plan()` 里用到的 `GRIP_OPEN` 等模块级常量，所以 `main()` 开头写
+`global GRIP_OPEN, ...` 再赋值。📘 Python 规定 `global` 声明必须出现在函数里第一次使用这个名字之前，
+否则报 `SyntaxError: name ... is used prior to global declaration`（`argparse` 的默认值就会先用到它）。

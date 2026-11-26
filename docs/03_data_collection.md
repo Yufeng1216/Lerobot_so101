@@ -1,228 +1,222 @@
-# 03 · 录制数据集
+# 03 · Recording the dataset
 
-目标：用主臂遥操作完成任务，录下 50 条示范（episode），上传到 Hugging Face Hub。
-**这一份数据集会被四个策略共用**，所以它的质量直接决定所有后续结果。
+**English** · [简体中文](03_data_collection.zh-CN.md)
 
-## 1. 录下来的到底是什么？
+Goal: teleoperate the task with the leader arm, record 50 demonstrations (episodes), and upload them to the Hugging Face Hub.
+**All four policies share this one dataset**, so its quality decides every result after it.
 
-`lerobot-record` 以 30 Hz 运行一个循环，每一帧（1/30 秒）记录：
+## 1. What actually gets recorded
 
-| 键 | 形状 | 含义 | 在训练里的角色 |
+`lerobot-record` runs a 30 Hz loop. Every frame (1/30 s) it stores:
+
+| Key | Shape | Meaning | Role in training |
 |---|---|---|---|
-| `observation.images.top` | 480×640×3 | 俯视相机画面 | 输入 |
-| `observation.images.wrist` | 480×640×3 | 腕部相机画面 | 输入 |
-| `observation.state` | 6 | **从臂**当前 6 个关节角度（归一化后） | 输入 |
-| `action` | 6 | **主臂**当前 6 个关节角度 = 发给从臂的目标位置 | 标签（要预测的东西） |
-| `task` | 字符串 | 任务描述，例如 "Pick up the blue plush toy and place it in the cardboard box." | SmolVLA / π₀.₅ 的语言输入 |
+| `observation.images.top` | 480×640×3 | overhead camera | input |
+| `observation.images.wrist` | 480×640×3 | wrist camera | input |
+| `observation.state` | 6 | the **follower's** 6 joint angles (normalised) | input |
+| `action` | 6 | the **leader's** 6 joint angles = the target sent to the follower | label (what we predict) |
+| `task` | string | task description, e.g. "Pick up the blue plush toy and place it in the cardboard box." | language input for SmolVLA / π₀.₅ |
 
-用深度学习的话说：**这就是一个 (x, y) 数据集**，x = 图像 + 状态（+ 语言），y = 动作。
-行为克隆就是学习 x → y 的映射。注意 `action` 来自主臂、`state` 来自从臂：
-策略学到的是"人在这种画面下会怎么移动"。
+In deep-learning terms, **this is just an (x, y) dataset**: x = images + state (+ language), y = action. Behavior cloning learns the mapping x → y.
+PS: `action` comes from the leader and `state` from the follower. So what the policy learns is "how a human moves given this view".
 
-## 2. 数据集在硬盘上长什么样（LeRobotDataset v3 格式）
+## 2. What the dataset looks like on disk (LeRobotDataset v3)
 
 ```
-data\Yufeng1216\so101_pick_place\        （仓库里的 data 文件夹，由 scripts/env.ps1 指定；不进 git，Hub 上有一份）
+data\Yufeng1216\so101_pick_place\        (set by scripts/env.ps1; not in git, a copy is on the Hub)
 ├── meta/
-│   ├── info.json        数据集"说明书"：fps、每个键的形状和类型、总帧数、总 episode 数
-│   ├── stats.json       每个键的统计量（mean/std/min/max/分位数），训练时用于归一化
-│   ├── tasks.parquet    任务描述字符串表
-│   └── episodes/        每个 episode 的起止帧、长度等索引
-├── data/chunk-000/file-000.parquet     所有帧的 state、action、时间戳（表格，多个 episode 拼在一起）
+│   ├── info.json        the dataset's "spec sheet": fps, shape and dtype of every key, total frames, total episodes
+│   ├── stats.json       per-key statistics (mean/std/min/max/quantiles), used for normalisation in training
+│   ├── tasks.parquet    table of task strings
+│   └── episodes/        per-episode index: start/end frame, length, ...
+├── data/chunk-000/file-000.parquet     state, action and timestamps of every frame (episodes concatenated in one table)
 └── videos/
-    ├── observation.images.top/chunk-000/file-000.mp4     相机画面压成视频（比存 PNG 小几十倍）
+    ├── observation.images.top/chunk-000/file-000.mp4     camera frames compressed as video (tens of times smaller than PNGs)
     └── observation.images.wrist/chunk-000/file-000.mp4
 ```
 
-训练时 LeRobot 按时间戳从 MP4 里解码出对应帧，和 parquet 里的 state/action 对齐，组成一个 batch。
+During training LeRobot decodes the frame at each timestamp from the MP4, lines it up with state/action from the parquet file, and builds a batch.
 
-## 3. 登录 Hugging Face（只需一次）
+## 3. Log in to Hugging Face (once)
 
-1. 在 <https://huggingface.co/settings/tokens> 创建一个 **Write** 类型的 token。
-2. 在终端运行下面的命令，按提示粘贴 token（粘贴时屏幕上不显示，这是正常的），
-   问是否存为 git credential 时选 `n`：
+1. Create a token of type **Write** at <https://huggingface.co/settings/tokens>.
+2. Run the commands below and paste the token when asked (nothing shows while you paste, that is normal). Answer `n` when asked to store it as a git credential:
 
 ```powershell
 hf auth login
 hf auth whoami
 ```
 
-`whoami` 打印出 `Yufeng1216` 就成功了。**token 只存在你本机，不要写进仓库里的任何文件。**
+If `whoami` prints your user name, you are in. **The token stays on your machine; never write it into any file in the repo.**
 
-## 4. 设计任务和录制协议
+## 4. Task and recording protocol
 
-本项目的任务：**把蓝色毛绒玩具放进快递盒**。
+Task: **put the blue plush toy into the cardboard box**.
 
-录制协议（四个策略共用，写下来是为了可复现）：
-
-| 项目 | 设定 |
+| Item | Setting |
 |---|---|
-| episode 数 | 50 |
-| 玩具起始位置 | 5 个位置 × 每个 10 次（用胶带在桌上标出 5 个点） |
-| 快递盒位置 | 固定不动（用胶带标出四个角） |
-| 每条最长时间 | 30 秒（做完按 → 提前结束） |
-| 复位时间 | 15 秒（把玩具放回下一个位置，主臂回到起始姿态） |
-| 起始姿态 | 每条开始时从臂都在同一个"收起"姿态 |
-| 相机 | 固定不动，录制期间不调整 |
+| Episodes | 50 |
+| Toy start positions | 5 spots × 10 each (taped on the table) |
+| Box position | fixed (four corners taped) |
+| Max length per episode | 30 s (press → to end early when done) |
+| Reset time | 25 s (move the toy to the next spot, bring the leader back to the start pose) |
+| Start pose | the follower starts every episode in the same "folded" pose |
+| Cameras | fixed, never adjusted during recording |
 
-为什么这样设计：
-- **多个起始位置**：如果玩具每次都在同一个点，策略只会记住一条轨迹，换个位置就失败。
-  这相当于数据增强 / 覆盖输入分布。
-- **其他条件固定**：先让问题足够简单，四个策略才可能都学会，之后的比较才有意义。
-- **动作风格一致**：每次都用差不多的方式抓（比如从上往下抓）。示范里的随意变化，
-  对 ACT 这种单峰回归模型来说就是"标签噪声"。Diffusion Policy 对多模态示范的处理更好，
-  这也是之后可以拿来对比讨论的点。
-- **判断标准**：只看相机画面，人自己能不能完成这个任务？能，信息就够了。
+Why this design:
 
-### 一条 episode 包含什么？
+- **Several start positions**: if the toy is always on the same spot, the policy just memorises one trajectory and fails anywhere else. So this is really about covering the input distribution, a kind of data augmentation.
+- **Everything else fixed**: keep the problem simple enough that all four policies can learn it; only then is comparing them meaningful.
+- **Consistent style**: grasp the same way every time (e.g. from above). Random variation between demos is "label noise" for a unimodal regression model like ACT.
+  Diffusion Policy can handle multimodal demos, which is one more point to compare later.
+- **Is the information enough?** Could a person do the task looking only at the camera views? If yes, the information is there.
 
-一条 episode = 任务描述从头到尾**做一遍**，只录"放进去"这一个方向：
+### What one episode contains
 
-```
-┌──────────── 录制中（进数据集）────────────────────────────────────┐ ┌──── 复位阶段（不录）────┐
-起始姿态 → 移到玩具上方 → 下降 → 夹住 → 抬起 → 移到盒子上方 → 松开 → 回到起始姿态 → 按 →   用手把玩具拿出来，
-                                                                                    放到下一个标记点
-```
-
-- **把玩具从盒子里拿出来，不要用机械臂做**，复位阶段直接用手拿。
-  如果"拿出来"也被录进去，数据集里就会出现两种相反的行为，却配着同一句任务描述
-  "place it in the box"，相当于标签自相矛盾，VLA 还会学到"语言和动作不对应"。
-- **结尾回到起始姿态**：每条的开头和结尾一致，策略也能学会"做完收回来"，而不是停在半空中。
-
-## 4.5 遥操作技巧：为什么老是抓不住
-
-第一次录测试集时最大的问题就是"抓不住"。从数据里看原因（夹爪 0 = 全闭合，100 = 全张开）：
+One episode = doing the task description **once**, start to finish, in the "put it in" direction only:
 
 ```
-t= 5.3s  主臂(action)= 44.1  从臂(state)= 43.4   ← 张开只用到了 44%
-t= 9.3s  主臂(action)=  1.4  从臂(state)=  8.1   ← 主臂已捏到底，从臂停在 8：玩具被夹住，但只被压缩了一点
+┌──────────── recording (goes into the dataset) ─────────────────────────────────┐ ┌──── reset (not recorded) ────┐
+start pose → above toy → down → grip → lift → above box → release → back to start pose → press →   take the toy out by hand,
+                                                                                               put it on the next spot
 ```
 
-1. **从臂夹爪的力是被故意限制的**：LeRobot 会把夹爪舵机的最大力矩设成 50%，过载时再降到 25%，
-   防止舵机烧掉。毛绒玩具又软，夹住时只被压缩了一点点，所以摩擦力很小，一抬就滑掉。
-   **不建议改这个限制**，要靠抓法解决。
-2. **张大再抓**：主臂扳机张到 70–80%，让两个爪子**包住玩具的主体**，而不是只捏到边缘。
-3. **从正上方下去**：先把夹爪移到玩具正上方，手腕朝下，**再垂直下降**，爪尖稍微压到桌面再闭合。
-   分成"对准 → 下降 → 闭合 → 抬起"四步，每步都慢一点。
-4. **闭合后一直捏紧**：搬运过程中扳机要一直按到底，一松手力就没了。
-5. **看 Rerun 里的腕部画面来对准**：从侧面看机械臂很难判断深度，腕部画面里玩具在两个爪子正中间时再闭合。
-6. **先空练 10 分钟**：只跑 `.\scripts\robot.ps1 teleop -Cameras` 练手，熟练了再录。
-   录进去的每一条都是策略的"教材"，犹豫和反复调整也会被学进去。
+- **Don't take the toy out of the box with the arm**; do it by hand during reset. Otherwise the dataset contains two opposite
+  behaviours under the same sentence "place it in the box": the labels contradict each other, and a VLA also learns that language and action don't match.
+- **End in the start pose**: every episode starts and ends the same way, so the policy also learns to fold back when done instead of stopping mid-air.
 
-## 5. 先录一个测试集（2 条，不上传）
+## 5. Teleoperation tips: why grasps keep slipping
 
-> 本项目实际用过的测试集名字是 `so101_pick_toy_test` 和 `so101_pick_toy_test2`；
-> 因为用了固定名字（不加时间戳），同名数据集已存在时 LeRobot 会拒绝创建，所以重录测试集要换个名字。
+The most common problem at first is "it won't hold the toy". Look at the data (gripper 0 = fully closed, 100 = fully open):
+
+```
+t= 5.3s  leader(action)= 44.1  follower(state)= 43.4   ← only 44% open
+t= 9.3s  leader(action)=  1.4  follower(state)=  8.1   ← leader fully squeezed, follower stops at 8: the toy is held but barely squeezed
+```
+
+The reason is that **the follower's gripper force is limited on purpose**: LeRobot caps the gripper servo at 50% torque,
+dropping to 25% on overload, so the servo doesn't burn out. A plush toy is soft, gets squeezed only a little, has little
+friction, and slips out on lift. Don't raise that limit; fix it with technique:
+
+1. **Open wide, then grasp**: open the trigger to 70–80% so both fingers **wrap around the toy's body**, not just pinch its edge.
+2. **Come straight down**: move the gripper above the toy with the wrist pointing down, **then descend vertically**, let the tips touch the table, and close.
+   Split it into "align → descend → close → lift", each step a bit slow.
+3. **Keep squeezing**: hold the trigger fully in while carrying; let go and the force is gone.
+4. **Aim with the wrist view in Rerun**: depth is hard to judge from the side; close when the toy is centred between the fingers in the wrist view.
+5. **Practise for 10 minutes first**: just run `.\scripts\robot.ps1 teleop -Cameras`. Every recorded episode is teaching material, hesitation and corrections included.
+
+## 6. Record a test set first (2 episodes, not uploaded)
 
 ```powershell
 .\scripts\robot.ps1 record -Name so101_pick_toy_test -Episodes 2 -EpisodeTime 20 -ResetTime 10 -NoPush
 ```
 
-录制时的键盘操作（终端窗口不需要在前台）：
+PS: LeRobot refuses to create a dataset whose name already exists, so use a new name to re-record a test set.
 
-| 按键 | 作用 |
+Keys while recording (the terminal does not need focus):
+
+| Key | Effect |
 |---|---|
-| **→**（右方向键）或 `n` | 提前结束当前这条，保存，进入复位阶段；复位阶段按也会提前结束复位 |
-| **←**（左方向键）或 `r` | 这条录坏了，丢弃并重录 |
-| **Esc** 或 `q` | 停止录制，保存并（如果开了上传）上传 |
+| **→** or `n` | end this episode early, save it, go to reset; during reset, end the reset early |
+| **←** or `r` | this episode is bad, discard and re-record |
+| **Esc** or `q` | stop recording, save and (if enabled) upload |
 
-电脑会用语音播报（英文，终端里也会打印同样的文字），要开着声音。完整时间线（来自 `lerobot_record.py` 源码）：
+The computer announces each phase by voice (also printed), so keep the sound on. The timeline (from the `lerobot_record.py` source):
 
 ```
-🔊 "Recording episode 0"   ← 开始录，立刻操作
-│  【录制】最长 episode_time_s 秒：抓 → 放进盒子 → 回起始姿态
-├─ 按 →（或时间到）
+🔊 "Recording episode 0"   ← recording starts, move right away
+│  [recording] up to episode_time_s: grasp → into the box → back to start pose
+├─ press → (or time runs out)
 🔊 "Reset the environment"
-│  【复位】reset_time_s 秒，不录；主臂仍控制从臂。做完可按 → 跳过剩余时间
-├─ 💾 此时才保存上一条
+│  [reset] reset_time_s, not recorded; the leader still drives the follower. Press → to skip the rest
+├─ 💾 only now is the previous episode saved
 🔊 "Recording episode 1"
 ```
 
-关于重录（←）：
+About re-recording (←):
 
-- **episode 在复位阶段结束后才保存**，所以录制中或复位中按 ← 都能丢弃它。
-- 录制中按 ←：停止录制 → 正常复位 → 🔊 "Re-record episode" → 重录同一编号。
-- 复位中按 ←：复位**立即结束**，**马上**开始重录。所以要先把场景复位好再按。
-- 每批**最后一条**没有复位阶段，按 → 就直接保存结束了，不满意要在录制中按 ←。
-- 编号从 0 开始；`-Resume` 追加时编号接着往下数。
+- **An episode is saved only after its reset ends**, so ← during recording or during reset both discard it.
+- ← during recording: stop recording → normal reset → 🔊 "Re-record episode" → record the same index again.
+- ← during reset: the reset **ends at once** and re-recording **starts right away**. So reset the scene first, then press it.
+- The **last episode of a batch** has no reset; → saves it and ends. If you don't like it, press ← while recording.
+- Indices start at 0; with `-Resume` they continue from where they were.
 
-录完后检查：
+Check two things afterwards:
 
-1. 终端最后会打印类似 `Cadence (episode 0): 29.88 Hz vs 30 Hz target` 的行，**实际帧率应接近 30 Hz**。
-   如果明显偏低（比如 20 Hz），说明电脑跟不上，需要排查（关掉其他程序、降低分辨率）。
-2. 回放第 0 条，看从臂能否重复出你的动作（**回放时从臂会自己动，注意安全**）：
+1. The terminal ends with lines like `Cadence (episode 0): 29.88 Hz vs 30 Hz target`. **The real rate should be close to 30 Hz.**
+   Clearly lower (say 20 Hz) means the computer can't keep up: close other programs or lower the resolution.
+2. Replay episode 0 and see whether the follower repeats your motion (**the follower moves on its own during replay, stay clear**):
 
 ```powershell
 lerobot-replay --robot.type=so101_follower --robot.port=COM3 --robot.id=so101_follower --dataset.repo_id=Yufeng1216/so101_pick_toy_test --dataset.episode=0
 ```
 
-测试集没问题就可以删掉（它在 `data\Yufeng1216\so101_pick_toy_test`）。
+If the test set looks fine you can delete it (`data\Yufeng1216\so101_pick_toy_test`).
 
-## 6. 正式录制（5 批 × 10 条，自动上传）
+## 7. The real recording (5 batches × 10, uploaded automatically)
 
-### 摆场
+### Setting up the scene
 
-1. 快递盒四角用**小块浅色胶带**标出（或直接粘在桌上），整个项目期间不再移动。
-2. 5 个玩具起始点：在玩具**正下方**贴小标记（玩具放上去就盖住，相机基本拍不到）。
-   点要在从臂舒服够得到的范围内，彼此相隔 8–15 cm，玩具朝向保持一致。
-3. 相机固定后，从录制到最后评估都**不再动**；标记也不要撕。
-   （训练和测试时画面不一致就是分布偏移，会直接拉低成功率。）
-4. 摆完先用遥操作在每个点各试抓一次。
+1. Mark the box's four corners with **small pieces of light tape** (or tape the box down). It does not move for the whole project.
+2. The 5 toy spots: put small marks **right under** the toy (the toy covers them, so the camera barely sees them).
+   Keep them within easy reach of the follower, 8–15 cm apart, toy always facing the same way.
+3. Once the cameras are fixed, **don't touch them** from recording to the final evaluation, and keep the marks.
+   A view that differs between training and testing is a distribution shift and directly costs success rate.
+4. Teleoperate one grasp at each spot as a test.
 
-### 录制
+### Recording
 
-每批 10 条，顺序 ①①②②③③④④⑤⑤，5 批正好每个点 10 条。第一批：
+10 episodes per batch in the order ①①②②③③④④⑤⑤; 5 batches give 10 per spot. First batch:
 
 ```powershell
 .\scripts\robot.ps1 record -Name so101_pick_place -Episodes 10 -ResetTime 25
 ```
 
-之后每批追加（`-Episodes` 是**这次要追加的条数**，不是总数）：
+Then append each further batch (`-Episodes` is **how many to add this time**, not the total):
 
 ```powershell
 .\scripts\robot.ps1 record -Name so101_pick_place -Episodes 10 -ResetTime 25 -Resume
 ```
 
-节奏要点：
+Rhythm:
 
-- 复位 25 秒是上限：在复位阶段就把玩具放好、主臂摆回起始姿态，然后**按 → 跳过剩余时间**。
-- 听到 "Recording episode" **立刻**开始动。
-- 放进盒子 → 回到起始姿态 → **马上**按 →。
-- 录制中手和身体不要进入俯视画面。
-- 每批录完，等终端回到提示符（上传完成）再开始下一批。
+- 25 s of reset is only the upper limit: place the toy, bring the leader back, then **press → to skip the rest**.
+- Start moving **as soon as** you hear "Recording episode".
+- Into the box → back to the start pose → press → **right away**.
+- Keep hands and body out of the overhead view while recording.
+- After each batch, wait for the prompt to come back (upload finished) before the next one.
 
-### 每批录完都检查
+### Check after every batch
 
 ```powershell
 python scripts/inspect_dataset.py Yufeng1216/so101_pick_place --frames
 ```
 
-它会给每条 episode 打印时长、空闲占比、开头等待、结尾等待和夹爪最大张开度，并标出可疑的条目
-（`NO MOTION`、`slow start`、`idle tail` 等）。`--frames` 会在 `outputs/dataset_check/` 下给每条生成一张
-缩略图（两路相机各 6 帧），可以快速确认是否成功。
+For every episode it prints length, idle fraction, wait at the start, wait at the end and maximum gripper opening, and flags suspicious ones
+(`NO MOTION`, `slow start`, `idle tail`, ...). `--frames` writes a thumbnail per episode to `outputs/dataset_check/`
+(6 frames from each camera), so you see at a glance whether it succeeded.
 
-也可以在网页上看（同步播放两路视频和关节曲线）：
+Or look at it in the browser (both videos and the joint curves in sync):
 <https://huggingface.co/spaces/lerobot/visualize_dataset?path=/Yufeng1216/so101_pick_place/episode_0>
 
-最终数据集（`inspect_dataset.py` 统计）：50 / 50 条可用，平均约 11 秒，空闲占比 18%，没有开头等待超过 3 秒的条目。
+Final dataset: 50 / 50 usable episodes, about 11 s on average, 18% idle, none with more than 3 s of waiting at the start.
 
-为什么"开头等待"这么重要：策略学的是"看到这个画面 → 做这个动作"。如果示范开头总是空等几秒，
-起始画面对应的"正确标签"就是"不动"，部署时策略可能一直停在起始姿态。
+PS: why does "waiting at the start" matter so much? The policy learns "this view → this action". If demos often idle for a few
+seconds at the start, the "correct label" for the start view becomes "don't move", and the deployed policy may just sit in the start pose.
 
-## 7. 常见问题
+## 8. Troubleshooting
 
-| 现象 | 原因 / 解决 |
+| Symptom | Cause / fix |
 |---|---|
-| `OpenCVCamera(2) failed to set fps=30 (actual_fps=0.0)` | 腕部相机偶发连接失败（线随机械臂运动被扯到）。重插 USB 后重跑。`robot.ps1 record` 现在会先跑 `scripts/check_cameras.py` 预检查，相机不通就不会开始 |
-| `Dataset folder already exists` | 上一次运行失败时 LeRobot 已经建了文件夹。打开 `<文件夹>\meta\info.json`，如果 `total_episodes` 是 0，说明是空壳，删掉文件夹重来；如果有数据，加 `-Resume` 继续录 |
+| `OpenCVCamera(2) failed to set fps=30 (actual_fps=0.0)` | The wrist camera occasionally drops out (its cable gets tugged as the arm moves). Re-plug and run again. `robot.ps1 record` runs `scripts/check_cameras.py` first and won't start if a camera fails |
+| `Dataset folder already exists` | A failed run already created the folder. Open `<folder>\meta\info.json`: `total_episodes` 0 means an empty shell, delete it and start over; if it has data, add `-Resume` to continue |
 
-> 为什么会留下空壳：`lerobot-record` 的执行顺序是"先创建数据集 → 再连接相机和机械臂"，
-> 所以连接一失败，就留下一个只有 `meta/info.json` 的空文件夹。
+PS: why the empty shell? `lerobot-record` creates the dataset first and connects cameras and arm second, so a failed connection leaves a folder with only `meta/info.json`.
 
-## 8. 好数据的检查清单
+## 9. Checklist for good data
 
-- [ ] 每条都**成功**完成任务（失败的按 ← 重录，不要留在数据集里）
-- [ ] 动作平稳，没有长时间停顿（停顿太多，策略会学会"发呆"）
-- [ ] 玩具在两个相机里都能看到
-- [ ] 5 个起始位置的条数大致均衡
-- [ ] 光照和背景在整个录制过程中保持一致
+- [ ] every episode **succeeds** (re-record failures with ←, don't keep them)
+- [ ] smooth motion, no long pauses (too many pauses and the policy learns to stand still)
+- [ ] the toy is visible in both cameras
+- [ ] roughly the same number of episodes per start spot
+- [ ] lighting and background stay the same throughout

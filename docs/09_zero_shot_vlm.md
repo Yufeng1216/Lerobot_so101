@@ -1,106 +1,179 @@
-# 09 · 零样本基线：视觉语言模型 + 逆运动学（不用任何示范）
+# 09 · Zero-shot baseline: vision-language model + inverse kinematics (no demonstrations)
 
-> 状态：感知、几何和抓取脚本都已完成，真机上已经抓成功过（第 6、7 节）；正式的 40 次评估待做。
+**English** · [简体中文](09_zero_shot_vlm.zh-CN.md)
 
-## 1. 为什么要做这组实验
+## 1. Why this experiment
 
-前面四个策略（ACT、Diffusion、SmolVLA、π₀.₅）都是**端到端模仿学习**：用 50 条示范学习"图像 → 动作"。
-最近另一条路线很热门：**不训练**，让通用视觉语言模型（VLM）理解场景，再用传统的几何方法和运动规划执行。
+The four policies so far (ACT, Diffusion, SmolVLA, π₀.₅) are all **end-to-end imitation learning**: they learn "image → action" from 50 demos.
+The other route is **no training at all**: let a general vision-language model (VLM) understand the scene, then execute with classical geometry and a fixed motion script.
 
-把两条路线放在**同一个任务、同一套评估协议**下比较，回答一个实际问题：
+Putting both routes on **the same task with the same evaluation protocol** answers a practical question:
 
-> 50 条人工示范带来的提升，到底比"现成大模型 + 几何计算"多多少？各自在哪种情况下失败？
+> How much do 50 human demos actually add over "an off-the-shelf model + geometry"? And where does each one fail?
 
-## 2. 流水线
+## 2. Pipeline
 
 ```
-俯视相机画面（640×480）
+overhead camera frame (640×480)
    │
-   ▼  ① 感知：VLM（Qwen3-VL-2B-Instruct，本地运行）
-   │     提示词："Point to the blue plush toy" / "Point to the center of the cardboard box"
-   │     输出：像素坐标 (u, v)
-   ▼  ② 像素 → 桌面坐标：单应性矩阵（用示范数据标定；玩具和盒子各用一个，见第 6 节）
-   │     (u, v) ──H──▶ (x, y)，机械臂底座坐标系，单位米；z 取桌面高度
-   ▼  ③ 逆运动学（IK）：SO-101 URDF + 数值求解
-   │     末端目标位姿 → 5 个关节角度（+ 夹爪）
-   ▼  ④ 脚本化动作序列（open-loop）
-         张开 → 移到玩具上方 10 cm → 竖直下降 → 闭合 → 抬起 →
-         移到盒子上方 → 松开 → 回到起始姿态
-   ▼  ⑤（可选）闭环重试：放完再拍一张，问 VLM "玩具在盒子里吗？"，没有就从 ① 重来
+   ▼  ① perception: VLM (Qwen3-VL-2B-Instruct, running locally)
+   │     prompts: "Point to the blue plush toy" / "Point to the center of the cardboard box"
+   │     output: pixel coordinates (u, v)
+   ▼  ② pixel → table: homography H (calibrated from the demos; one for the toy, one for the box)
+   │     (u, v) ──H──▶ (x, y), in the arm's base frame, metres
+   ▼  ③ inverse kinematics (IK): SO-101 URDF + damped least squares
+   │     "gripper tip at (x, y, z), pointing down" → 5 joint angles
+   ▼  ④ fixed motion script (open loop)
+         open → 6 cm above the toy → straight down → close → straight up to 11 cm →
+         over to the box → release → back to the start pose
 ```
 
-## 3. 各模块的选择和理由
+Let's go through what each block does.
 
-| 模块 | 选择 | 理由 |
+## 3. Perception: how a VLM "points" at something
+
+### 3.1 Qwen3-VL's structure
+
+Like SmolVLM and PaliGemma, Qwen3-VL-2B is "ViT + projection + language model":
+
+1. **Vision encoder** (ViT, 24 layers, width 1024, patch 16): it accepts **any resolution** without resizing to a square. A 640×480 image becomes 40×30 = 1200 patches.
+   Positions use 2D rotary position embeddings (RoPE), so the model knows each patch's row and column.
+2. **Merger**: each 2×2 group of neighbouring patches becomes one token (the same idea as SmolVLM's pixel shuffle): 1200 → **300 visual tokens**, then projected to the language model's width.
+3. **Language model** (Qwen3, 28 layers, width 2048, GQA with 16/8 heads): visual and text tokens form one sequence and the answer is generated **autoregressively**.
+
+### 3.2 Coordinates are just text
+
+The key point: Qwen3-VL saw lots of "point at the object" data (grounding) during pretraining, so it can **output coordinates as text**. Our prompt:
+
+```
+Point to the blue plush toy in the image. Answer only with JSON in this format: [{"point_2d": [x, y], "label": "toy"}]
+```
+
+It answers `[{"point_2d": [512, 233], "label": "toy"}]`. Those numbers are ordinary tokens, no different from generating a sentence.
+PS: Qwen3-VL outputs **relative coordinates on a 0–1000 scale**, not pixels; multiply by the image width/height and divide by 1000.
+
+Limit: the numbers are discrete tokens, so precision is capped, and the model gives a single point, not the object's size or orientation. For "roughly where is the toy" that is enough (§6).
+
+### 3.3 Why this model
+
+| Consideration | Reason |
+|---|---|
+| outputs coordinates directly | no separate detector needed |
+| 2B parameters | ~4 GB in bf16, fits the 8 GB GPU, ~1.7 s per query |
+| runs locally | free, and no images of the room go to an external server |
+
+## 4. Geometry: from pixels to the table
+
+### 4.1 Homography
+
+The camera gives a 2D image; the arm needs 3D coordinates. In general that takes depth, but our case is special: **the toy always lies on the table**, and the table is a plane.
+A plane seen through a perspective projection onto another plane (the image) is mapped by exactly one 3×3 matrix $H$, in homogeneous coordinates:
+
+$$\begin{bmatrix} x \\ y \\ 1 \end{bmatrix} \sim H \begin{bmatrix} u \\ v \\ 1 \end{bmatrix},\qquad x = \frac{h_{11}u + h_{12}v + h_{13}}{h_{31}u + h_{32}v + h_{33}},\quad y = \frac{h_{21}u + h_{22}v + h_{23}}{h_{31}u + h_{32}v + h_{33}}$$
+
+$H$ is defined up to scale, so it has 8 degrees of freedom. Each "pixel ↔ table point" pair gives 2 equations, so **4 pairs solve it**; more pairs go into least squares.
+The $h_{31}, h_{32}$ in the denominator are the perspective effect (near things look bigger). So **no depth camera** and no camera intrinsics are needed.
+
+### 4.2 Where the point pairs come from: the demos themselves
+
+Solving $H$ needs pairs. We didn't run a separate calibration; we took them from the 50 demos:
+
+- **pixel**: in each demo's first frame the blue toy is the only blue thing on the white table, so an HSV colour threshold + the largest connected component gives its centre $(u, v)$;
+- **table point**: at the moment the gripper closes on the toy, the recorded joint angles go through **forward kinematics (FK, §4.3)** to give the gripper tip's $(x, y)$.
+
+The toy doesn't move between those two moments, so each demo is one pair. `cv2.findHomography` solves $H$ with **RANSAC**:
+pick 4 random pairs, solve an $H$, count how many points agree with it (error < 1.5 cm), repeat many times, and keep the one with most agreement. Wrongly detected points drop out automatically.
+
+PS: the table grasp points all sit near the 5 marks (about 10×10 cm), and far from them $H$ extrapolates badly (24 cm off at the box).
+So the box gets a second mapping, `H_pixel_to_place`, fitted with the "moment of release" pairs added (the toy in the image ↔ the gripper position by FK).
+At release the toy is about 9 cm above the table, so there are a few cm of parallax, but the box opening is about 20 cm wide; good enough.
+
+### 4.3 Forward kinematics (FK)
+
+The arm is a chain of "link + joint". The URDF gives each joint's fixed offset (translation + rotation) from its parent link and its rotation axis.
+So the gripper tip's pose in the base frame is a product of 4×4 homogeneous transforms:
+
+$$T_{\text{tip}}(q) = \prod_{i=1}^{5} \Big( T_i^{\text{fixed}} \cdot \mathrm{Rot}(\text{axis}_i,\ q_i) \Big) \cdot T^{\text{tip}}$$
+
+The top-left 3×3 of $T$ is the orientation, the top-right 3×1 the position.
+
+PS: in LeRobot 0.7 the SO-101 joint readings are in degrees with 0° = middle of the calibrated range, the same zero as the official `so101_new_calib.urdf`, so they go straight in.
+We checked against the demos: over 35 table grasps, FK puts the gripper tip at **−0.8 ± 1.0 cm** height (tips pressing slightly into the soft table mat), and the grasp positions form 5 clusters, exactly the 5 taped marks.
+With a wrong zero or direction these numbers would be all over the place.
+
+### 4.4 Inverse kinematics (IK): damped least squares
+
+IK goes the other way: given "tip at $p^*$, gripper pointing down", find the joint angles $q$. The SO-101 has only 5 joints (and wrist_roll only spins the gripper about itself, not moving the tip),
+so an arbitrary orientation is impossible, but "position + pointing down" is solvable.
+
+There is no closed form, so we iterate. Define the 6-D residual:
+
+$$r(q) = \begin{bmatrix} p(q) - p^* \\ w \cdot \big(z_{\text{approach}}(q) - [0, 0, -1]^T\big) \end{bmatrix}$$
+
+The first 3 entries are the position error, the last 3 the difference between "the gripper's approach direction" and "straight down", weighted by $w = 0.05$.
+Each step uses a numerical Jacobian $J = \partial r / \partial q$ (move each joint 0.01° and see how the residual changes), then
+
+$$\Delta q = -J^T \big(J J^T + \lambda^2 I\big)^{-1} r$$
+
+- Without $\lambda$ this is Gauss-Newton; but near a singular pose (e.g. the arm stretched out) $JJ^T$ is nearly singular and $\Delta q$ explodes.
+  Adding $\lambda^2 I$ makes the step shrink automatically near singularities. That is **damped least squares** (the Levenberg-Marquardt idea).
+- PS: $\lambda$ has to match the units: 1° of joint motion moves the tip only about 3 mm, so Jacobian entries are around $10^{-3}$ and $\lambda \approx 10^{-3}$.
+- After each step the angles are clipped to the URDF joint limits.
+- The initial guess matters: from the folded start pose shoulder_lift sits right at its −100° limit and the solver gets stuck. So several typical grasp poses from the demos are used as seeds, keeping the best result.
+
+Result: **0.1 mm** error on table targets, gripper pointing straight down.
+
+## 5. Execution: a fixed motion script
+
+`run_grasp.py` chains the key poses solved by IK:
+
+```
+start pose → 6 cm above the toy (open) → straight down (IK every 0.5 cm, so the descent is a straight line) → close
+           → straight up to 11 cm → over to the box → release → back to the start pose
+```
+
+- Between key poses it interpolates linearly in joint space and sends targets at 30 Hz to `SO101Follower.send_action()`, at most 20°/s per joint by default.
+  That is **exactly the same low-level interface and calibration files** as the learned policies use, so the comparison is fair.
+- **Checked before moving**: targets within a sensible area, small IK error, and along every interpolated point of the path the tip stays above 2.5 cm below the table surface (and above 9 cm while carrying, so the toy doesn't hit the box wall).
+  If anything fails, nothing moves.
+- `--step` pauses before each segment until you press Enter; Ctrl+C first returns slowly to the start pose, then disconnects.
+
+Offline: a safe path can be planned from **every one** of the 50 demo start frames; one full attempt takes about 23 s.
+
+## 6. Offline validation
+
+Code in [`zero_shot/`](../zero_shot/); explained in [code_walkthrough.md](code_walkthrough.md) §14.
+
+| Module | Test | Result |
 |---|---|---|
-| VLM | **Qwen3-VL-2B-Instruct**（本地） | 支持"指向"类输出（直接给坐标）；2B 参数放得进 8 GB 显存；本地运行不花钱，也不会把房间画面发到外部服务器。首次使用需下载约 4 GB |
-| 像素 → 桌面 | **单应性矩阵（homography）** | 俯视相机 + 物体都在同一个桌面平面上：平面到平面的映射正好是一个 3×3 单应性矩阵，4 个以上的点对就能求出，**不需要深度相机** |
-| 标定方法 | **直接用 50 条示范数据**（不需要单独标定） | 每条示范的第一帧里，蓝色玩具的像素位置用颜色阈值求出；夹爪合上抓住它的那一刻，关节角度经**正运动学（FK）**算出夹爪尖的 (x, y)。玩具在这两个时刻之间没动过，所以每条示范就是一组"像素 ↔ 桌面"对应点，`cv2.findHomography`（RANSAC）求 H |
-| 机械臂模型 | `so101_new_calib.urdf`（[TheRobotStudio/SO-ARM100](https://github.com/TheRobotStudio/SO-ARM100) 的 `Simulation/SO101/`） | 官方 URDF，LeRobot 的 `lerobot-find-joint-limits` 也用它 |
-| IK | 用 URDF 的连杆参数写一个小的数值 IK（阻尼最小二乘） | SO-101 只有 5 个自由度，无法任意指定姿态，但"夹爪朝下、到达 (x, y, z)"这个约束是可解的。比引入完整的运动学库（placo 等）更轻，也更容易在面试中讲清楚 |
-| 执行 | 通过 LeRobot 的 `SO101Follower.send_action()` 发送关节目标，分段插值 | 和学习型策略走**完全相同的底层接口和标定文件**，对比才公平 |
+| FK | tip height at grasp time in the demos (`python -m zero_shot.check_fk`) | −0.8 ± 1.0 cm; 5 clusters = the 5 marks |
+| IK | table targets | 0.1 mm error, gripper straight down; 4–6 mm when hovering 10 cm above (wrist at its 95° limit) |
+| toy mapping `H_pixel_to_table` | 35 pairs, 25 RANSAC inliers | pixel → table error median 0.6 cm, max 1.4 cm |
+| box mapping `H_pixel_to_place` | release pairs added | median 1.3 cm at the release point |
+| VLM pointing at the toy | first frame of the 50 demos vs. the colour-detected centre | 50/50 answered; error median 0.5 cm, 90th percentile 1.0 cm, max 1.5 cm |
+| VLM pointing at the box centre | same | always inside the box, varying by ~3 cm front to back ("centre" is vague in itself); fine for dropping into the box |
 
-## 4. 已知局限（实验报告里要写明）
+⇒ **Perception and geometry are not the bottleneck** (about 1 cm error, far smaller than the toy). On the robot, success will mostly depend on whether the fixed grasp holds a soft toy and whether the toy gets bumped during open-loop execution.
 
-- **只有俯视 RGB，没有深度**：假设物体都在桌面上，抓取高度是固定的。我们的任务满足这个条件；物体叠放或悬空时就不成立。
-- **固定的抓取方式**：只会"从正上方竖直夹"。对软的毛绒玩具，成功率可能不如学出来的策略。这正是值得报告的对比点。
-- **开环执行**：动作执行过程中不看画面，被碰到或者滑掉了也不知道。⑤ 的重试只在一次尝试结束后起作用。
-- **VLM 指向误差**：2B 模型的坐标可能偏几十像素。需要单独测"指向准确率"（和人工标注的位置比较），才能区分失败是感知的问题还是执行的问题。
+## 7. Known limitations (state them in the report)
 
-## 5. 评估
+- **Overhead RGB only, no depth**: objects are assumed to lie on the table, grasp height is fixed. True for our task; false for stacked or raised objects.
+- **One fixed grasp**: only "straight down from above". For a soft plush toy it may be worse than a learned policy. That's exactly a comparison worth reporting.
+- **Open loop**: it doesn't look while moving, so it can't tell if the toy got bumped or slipped.
+- **Depends on the base position**: every target is computed in the base frame, and the mappings were calibrated for where the base was. Move the base 1 cm and the gripper lands "precisely" 1 cm off.
 
-- 和其他策略**完全相同**：5 个标记点 × 4 次 = 20 次，同样的成功 / 部分成功 / 失败标准（见 [08_evaluation.md](08_evaluation.md)）。
-- 额外记录：每次的 VLM 指向误差（像素）、IK 是否有解、单次耗时（VLM 推理 + 运动）。
-- 失败归因：感知错 / IK 无解 / 抓空 / 搬运中掉落 / 放偏。
-
-## 6. 实现进度和离线验证结果
-
-代码在 [`zero_shot/`](../zero_shot/)，讲解见 [code_walkthrough.md](code_walkthrough.md#14-zero_shot零样本基线)。
-
-- [x] **正 / 逆运动学**（`kinematics.py`）。LeRobot 0.7 的 SO-101 关节读数就是"度"，0° = 校准范围中点，
-  和官方 `so101_new_calib.urdf` 的零点一致，可以直接代入。
-  - 用示范数据验证 FK（`python -m zero_shot.check_fk`）：35 次桌面抓取时夹爪尖高度 **−0.8 ± 1.0 cm**，
-    夹爪几乎垂直向下；抓取位置聚成 5 簇，每簇分散约 1 cm，正好对应 5 个胶带标记点。零点或方向错了，高度会乱。
-  - IK：桌面目标误差 **0.1 mm**、夹爪垂直向下；目标上方 10 cm 悬停误差 4–6 mm（腕关节到了 95° 限位）。
-    从收拢姿态出发会卡在 shoulder_lift 的 −100° 限位上，所以用示范里典型的抓取姿态做初值。
-- [x] **像素 → 桌面单应性**（`calibrate_from_demos.py`）。玩具用的 `H_pixel_to_table`：35 组对应点，25 个 RANSAC 内点，
-  由像素推桌面位置的误差 **中位 0.6 cm、最大 1.4 cm**。
-- [x] **盒子用单独的映射** `H_pixel_to_place`。上面那个只用桌面抓取点拟合，点都挤在 10×10 cm 的区域里，
-  外推到盒子那边误差 **24 cm**（透视项在远处放大）。加上示范里"松手那一刻"的对应点（画面里的玩具 ↔ FK 算的夹爪位置）
-  一起拟合后，松手处误差 **1.3 cm**。松手时玩具离桌面约 9 cm，有几厘米视差，但盒口约 20 cm 宽，够用。
-- [x] **Qwen3-VL 指向**（`pointing.py`、`eval_pointing.py`）。在 50 条示范的第一帧上，和颜色检测的玩具中心比较：
-
-  | 目标 | 结果 |
-  |---|---|
-  | 玩具 | 50/50 都给出了坐标；误差 **中位 0.5 cm、90% 分位 1.0 cm、最大 1.5 cm**，全部在 2 cm 以内 |
-  | 盒子中心 | 每次都落在盒子里，但前后位置相差约 3 cm（"盒子中心"本身不够明确）；放进盒子足够 |
-  | 速度 | 每次询问约 1.7 s（RTX 3070 Laptop，bf16） |
-
-  Qwen3-VL 输出的是 0–1000 的**相对坐标**，不是像素，要按图像宽高换算。
-
-- [x] **抓取动作序列 + 安全限制**（`run_grasp.py`）：
-  张开 → 玩具上方 6 cm → 竖直下降（逐点 IK）→ 闭合 → 竖直抬到 11 cm → 平移到盒子上方 → 松开 → 回起始姿态。
-  动之前检查：目标在合理区域内、IK 误差小、整条插值路径的夹爪尖不低于桌面 2.5 cm（搬运时不低于 9 cm，免得玩具撞盒壁）。
-  默认每个关节最快 20°/s；`--step` 每段按 Enter；Ctrl+C 时先慢慢回到起始姿态再断电。
-  离线：50 条示范的起点**全部**能规划出安全路径，一次动作约 23 s。
-- [x] **真机试抓**（见第 7 节）
-- [ ] 按评估协议（[08](08_evaluation.md)：晚上灯光、底座固定、40 次）测试，填进 README 结果表
-
-离线结果说明：**感知和几何本身不是瓶颈**（误差约 1 cm，远小于玩具本身的大小）。
-真机上的成败主要会取决于固定抓取方式能否夹住软的玩具，以及开环执行时玩具是否被碰动。
-
-## 7. 真机试抓记录
+## 8. Running and evaluating
 
 ```powershell
-python -m zero_shot.run_grasp --dry-run                       # 只拍照、指向、规划，机械臂不动
-python -m zero_shot.run_grasp --step --speed 15 --open 60     # 真机，每段按 Enter
+python -m zero_shot.run_grasp --dry-run                         # photo, pointing and planning only; the arm doesn't move
+python -m zero_shot.run_grasp --speed 15 --open 60              # real robot, one automatic attempt
+python -m zero_shot.run_grasp --trials 40 --name zero_shot      # evaluation: enter the result after each attempt
 ```
 
-每次试验在 `outputs/zero_shot/<name>/` 留下：`attempts.csv`（像素、桌面坐标、耗时、结果，
-以及下降到底和闭合后**实测**的关节角和夹爪尖高度）、标注了 VLM 指向的照片、真机时还有
-"玩具上方 / 最低点 / 闭合后"三个时刻的俯视 + 腕部照片。
+Each attempt leaves in `outputs/zero_shot/<name>/`: `attempts.csv` (pixels, table coordinates, timing, result, plus the **measured** joint angles and tip height at the bottom and after closing),
+a photo annotated with the VLM's points, and overhead + wrist photos at three moments ("above the toy / lowest point / after closing").
 
-真机已完成一次完整的抓取和放置（`--open 60`，闭合后夹爪读数 3.9，说明夹着玩具）。成功率等按评估协议测完再写。
+Tunable: `--open` (opening 0–100; the demos average ~39), `--close-early` (start closing this many cm above the grasp height; helps with soft toys), `--grasp-z` (grasp height, cm), `--speed` (°/s).
 
-可调参数：`--open`（张口 0–100，示范平均约 39）、`--close-early`（离抓取高度还有几厘米时开始合拢，
-对软玩具有帮助）、`--grasp-z`（抓取高度，cm）、`--speed`（°/s）。
+Evaluation is **exactly the same** as for the other policies: 5 spots × 8 = 40 trials, the same success / partial / failure criteria ([08_evaluation.md](08_evaluation.md)).
+Additionally record VLM time and motion time per attempt, and attribute failures to: wrong point / no IK solution / missed grasp / dropped while carrying / placed off target.

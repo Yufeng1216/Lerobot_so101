@@ -1,5 +1,7 @@
 # SO-101 Imitation Learning: ACT → Diffusion Policy → SmolVLA → π₀.₅
 
+**English** · [简体中文](README.zh-CN.md)
+
 Reproducing four modern robot-learning policies on a low-cost **SO-101** arm with
 [🤗 LeRobot](https://github.com/huggingface/lerobot), end to end on real hardware:
 teleoperated data collection → training → deployment and evaluation on the real robot —
@@ -14,8 +16,6 @@ and comparing them against a **zero-shot baseline** that uses no demonstrations 
 | ![ACT rollout](assets/act_success.gif) | ![Diffusion Policy rollout](assets/diffusion_success.gif) |
 
 <sub>Autonomous rollouts recorded during evaluation, 2× speed. Left of each clip: overhead camera; right: wrist camera.</sub>
-
-> 中文教程见 [`docs/`](docs/)（所有教程用中文写成，命令可直接复制运行）。
 
 | Policy | Paper | Params | Type | Trained on |
 |---|---|---|---|---|
@@ -65,14 +65,14 @@ config/          robot.example.json  → copy to robot.json (your COM ports, cam
 scripts/         runs on the Windows laptop: hardware checks, recording, local training, deployment
 cloud/           runs elsewhere: Slurm cluster and rented Hugging Face GPUs, for models that need more than 8 GB
 zero_shot/       the no-demonstration baseline: SO-101 kinematics, pixel→table homography, local VLM pointing, real-robot grasp script
-docs/            step-by-step tutorial, one file per stage
+docs/            step-by-step tutorial, one file per stage (English `*.md`, Chinese `*.zh-CN.md`)
 results/         per-trial real-robot evaluation sheets
-assets/          README media (rollout GIFs, results chart)
+assets/          README media (rollout GIFs)
 ```
 
 ## Tutorial
 
-New to the tooling? Start with [docs/how_this_repo_works.md](docs/how_this_repo_works.md) (what every file and tool is for).
+The model chapters (4–7, 9) build each architecture up from the basics before the commands. New to the tooling? Start with [docs/how_this_repo_works.md](docs/how_this_repo_works.md) (what every file and tool is for).
 
 | # | Stage | Doc |
 |---|---|---|

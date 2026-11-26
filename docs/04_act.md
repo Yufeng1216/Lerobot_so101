@@ -1,231 +1,287 @@
-# 04 · ACT：Action Chunking with Transformers
+# 04 · ACT: Action Chunking with Transformers
 
-论文：Zhao et al., *Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware*, RSS 2023
-（[arXiv:2304.13705](https://arxiv.org/abs/2304.13705)）。
+**English** · [简体中文](04_act.zh-CN.md)
 
-ACT 是四个策略里**最先训练**的：参数少（本项目配置下 51.6M）、训练快、50 条示范通常就能学会。
-它也是后面三个策略的**基线**。
+Paper: Zhao et al., *Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware*, RSS 2023
+([arXiv:2304.13705](https://arxiv.org/abs/2304.13705)).
 
-## 1. 问题设定
+ACT is the **first** of the four policies we train: small (51.6M parameters in our config), fast to train, and 50 demos
+are usually enough. It is also the **baseline** for the other three.
 
-行为克隆：给定观测 $o_t$（两路图像 + 6 维关节状态），预测动作 $a_t$（6 维目标关节角度）。
-最朴素的做法是训练一个网络 $\pi(a_t \mid o_t)$，每一步预测一个动作，用 MSE 回归。实际效果很差，原因有两个：
+## 1. The problem
 
-1. **误差累积（compounding error）**：每一步的小误差会让机器人进入训练数据里没见过的状态，
-   下一步误差更大，滚雪球。单步预测时，一条 300 步的 episode 要连续做对 300 次决策。
-2. **示范不一致**：人在同一个画面下，有时先停顿再抓，有时直接抓。对 MSE 来说这是
-   同一个输入对应多个标签，模型只会学到它们的平均值：一个"犹豫不决"的动作。
+Behavior cloning is just supervised learning: given the observation $o_t$ (two images + the 6-D joint state $s_t$),
+predict the action $a_t$ (6 target joint angles); labels come from human demos. The obvious approach is a network
+$\pi(a_t \mid o_t)$ that predicts one action per step, trained with MSE. In practice it works badly, for two reasons:
 
-## 2. ACT 的两个核心想法
+1. **Compounding error**: in training the network only sees states the human visited; at deployment it sees states it
+   visited itself. A small error at one step takes the robot to a state not in the data, the next error is bigger, and it snowballs.
+   With one-step prediction, a 300-step episode needs 300 correct decisions in a row.
+2. **Inconsistent (multimodal) demos**: from the same view, the human sometimes pauses before grasping and sometimes doesn't;
+   sometimes goes around on the left, sometimes on the right. For MSE that is one input with several labels, and the MSE
+   optimum is the conditional mean $\mathbb{E}[a \mid o]$, so the model learns their average: a "hesitating" action
+   (average left and right and you hit the obstacle in the middle).
 
-### (1) Action chunking：一次预测未来 k 步
+ACT's two key ideas map onto these two problems: action chunking for compounding error, a CVAE for multimodality.
 
-ACT 预测的是 $\pi(a_{t:t+k} \mid o_t)$，一次输出 **k = 100 步**动作（30 Hz 下约 3.3 秒）。
+## 2. Idea one: action chunking
 
-- 决策次数减少到原来的 1/k，误差累积的"有效步数"大大缩短。
-- 一段动作作为整体预测，内部自然连贯，相当于在动作序列上建模，而不是逐点建模。
-  类比：语言模型一次生成一个短语，而不是每个字母都重新决定。
+If error accumulates step by step, make fewer decisions. ACT predicts a whole segment instead of one action:
 
-### (2) CVAE：用隐变量吸收示范中的"风格差异"
+$$\pi(a_{t:t+k} \mid o_t),\quad k = 100$$
 
-训练时有一个额外的 **CVAE 编码器**，它看到"真实的未来动作序列 + 当前关节状态"，
-把它压缩成一个 32 维的隐变量 $z$（风格向量：快一点还是慢一点、从哪边绕过去）。
-解码器以 $z$ 为条件来重建动作序列。
+That is **100 actions** at once (about 3.3 s at 30 Hz); the output tensor is `(batch, 100, 6)`.
 
-- 训练：$z \sim q_\phi(z \mid a_{t:t+k}, s_t)$，损失 = **L1 重建误差 + β · KL(q ‖ N(0, I))**，β = `kl_weight` = 10。
-- 推理：没有未来动作可以看，直接令 **z = 0**（先验的均值），得到一个"标准风格"的动作序列。
+- 1/k as many decisions, so the "effective number of steps" for error to pile up is 100× shorter.
+- A segment predicted as a whole is coherent inside. The network learns "what a stretch of trajectory looks like", not 100 independent points.
+  Example: a language model that picked every letter independently would often spell non-words; generating a phrase at a time reads much better.
+- PS: human motion is segmented anyway ("reach", "grasp", "lift"); 3.3 s is about one such segment.
 
-这样，示范之间的不一致被 $z$ 解释掉了，解码器不必学一个模糊的平均值。
+## 3. Idea two: a CVAE
 
-## 3. 网络结构
+### 3.1 Start from the VAE
+
+The trouble with multimodality is that, given only $o_t$, the label $a_{t:t+k}$ is uncertain. So introduce a latent
+variable $z$ for "which style this time", such that $a$ becomes determined once $(o, z)$ is given:
+
+$$p(a \mid o) = \int p(a \mid o, z)\, p(z)\, dz$$
+
+That is the idea of a VAE (Variational Autoencoder). The problem: in training we don't know each demo's $z$, and the
+integral can't be computed. So the VAE trains an **encoder** $q_\phi(z \mid a, o)$ as well: it sees the answer (the true
+action sequence) and guesses that demo's $z$. The objective is the evidence lower bound (ELBO):
+
+$$\log p(a \mid o) \ \ge\ \underbrace{\mathbb{E}_{z\sim q_\phi}\big[\log p_\theta(a \mid o, z)\big]}_{\text{reconstruction: rebuild } a \text{ from the guessed } z} \;-\; \underbrace{\mathrm{KL}\big(q_\phi(z \mid a, o)\,\|\,p(z)\big)}_{\text{regulariser: keep } z \text{ close to the prior}}$$
+
+- Reconstruction: with a Laplace $p_\theta$, $-\log p$ is the **L1 error**, which is what ACT uses.
+- KL: with a standard-normal prior $p(z)=\mathcal{N}(0,I)$ and a Gaussian encoder $\mathcal{N}(\mu, \sigma^2)$, the KL has a closed form:
+  $\mathrm{KL} = -\tfrac12 \sum_j \big(1 + \log\sigma_j^2 - \mu_j^2 - \sigma_j^2\big)$.
+  PS: this is the same KL divergence as in information theory; here it forces "the distribution of $z$ to look like a standard normal".
+- Sampling is not differentiable? Use the **reparameterisation trick**: $z = \mu + \sigma \odot \epsilon,\ \epsilon \sim \mathcal{N}(0, I)$, so gradients flow through $\mu$ and $\sigma$.
+
+"C" (conditional) just means generation is conditioned on the observation $o$.
+
+### 3.2 The CVAE inside ACT
+
+ACT's loss is the negative of that ELBO:
+
+$$\mathcal{L} = \underbrace{\frac{1}{k}\sum_{i}\big\|a_{t+i} - \hat a_{t+i}\big\|_1}_{\texttt{l1\_loss}} \;+\; \beta \cdot \underbrace{\mathrm{KL}\big(q_\phi(z \mid a_{t:t+k}, s_t)\,\|\,\mathcal{N}(0,I)\big)}_{\texttt{kld\_loss}},\qquad \beta=\texttt{kl\_weight}=10$$
+
+Two differences from a textbook VAE:
+
+- **The encoder doesn't see the images**, only the joint state $s_t$ and the action sequence $a_{t:t+k}$. The decoder uses the image information itself; $z$ only carries "style".
+- **At inference $z = 0$** (the prior mean) instead of a sample from $\mathcal{N}(0,I)$. So the deployed ACT is deterministic: the same observation always gives the same chunk.
+
+PS: a larger $\beta$ puts less information into $z$. If `kld_loss` stays at 0, the encoder has collapsed $z$ onto the prior
+and the decoder ignores it (posterior collapse); the CVAE has then degenerated into plain regression.
+
+## 4. Architecture
+
+Three parts: the CVAE encoder (training only), the main encoder, and the decoder.
+
+### 4.1 CVAE encoder (training)
 
 ```
- top 图像 ─┐
-           ├─ ResNet18（ImageNet 预训练）→ 特征图 → 展平成 token（每张图 15×20 = 300 个）
-wrist 图像 ┘
-关节状态 s_t ─ Linear → 1 个 token
-隐变量 z     ─ Linear → 1 个 token          （训练时来自 CVAE 编码器，推理时 z = 0）
-                 │
-                 ▼
-     Transformer 编码器（4 层，d=512，8 头）  ← 所有 token 做自注意力
-                 │
-                 ▼
-     Transformer 解码器（1 层）
-       query = 100 个可学习的位置 query      ← 每个 query 负责输出一步动作
-       cross-attention 到编码器输出
-                 │
-                 ▼
-     Linear → 100 × 6 的动作序列 a_{t:t+100}
+[CLS] token         ─ learned embedding               ─┐
+joint state s_t (6) ─ Linear → 512                    ─┤  1 + 1 + 100 = 102 tokens
+actions a (100×6)   ─ Linear → 512 (one token per step)─┘  + sinusoidal positional encoding
+                         │
+          Transformer encoder (4 layers, d=512, 8 heads)
+                         │
+            output at [CLS] → Linear → (μ, log σ²), 32-D each
+                         │
+            z = μ + σ·ε (reparameterisation)
 ```
 
-和你熟悉的模型对应起来：这基本就是 **DETR**（目标检测 Transformer）的结构，
-把"100 个物体 query"换成了"100 个时间步 query"。
+This is BERT's trick: a [CLS] token that summarises the whole sequence.
 
-## 4. 推理时怎么执行动作块
+### 4.2 Main encoder
 
-默认（`n_action_steps = 100`）：预测 100 步 → 全部执行完 → 再看一次画面、预测下一块。
-每 3.3 秒才"看"一次，反应慢，块与块的交界处可能有跳变。
+```
+ top image   (3×480×640) ─┐
+                          ├─ ResNet18 without the final pool and fc → feature map 512×15×20
+wrist image (3×480×640) ─┘     (downsampled 32×: 480/32=15, 640/32=20)
+                               → 1×1 conv → flatten into 300 tokens of 512-D (per image)
+                               + 2D sinusoidal positional encoding (where on the image each token is)
+joint state s_t ─ Linear → 1 token
+latent z        ─ Linear → 1 token          (from the CVAE encoder in training, z = 0 at inference)
+                         │
+         1 + 1 + 300 + 300 = 602 tokens
+                         │
+     Transformer encoder (4 layers, d=512, 8 heads, FFN 3200) ← self-attention over all tokens
+```
 
-**Temporal ensembling**（论文里的做法，可选）：**每一步**都重新预测一个 100 步的块，
-于是同一时刻 t 会有多个块对它给出预测；按指数权重 $w_i = e^{-m \cdot i}$ 对它们加权平均后再执行。
-动作更平滑，反应更快，代价是每步都要跑一次网络（ACT 足够小，30 Hz 跑得动）。
-部署时用 `--policy.temporal_ensemble_coeff=0.01 --policy.n_action_steps=1` 开启。两种方式我们都会测。
+- ResNet18 starts from ImageNet weights and is fine-tuned along with everything else (backbone learning rate also 1e-5).
+- Both cameras share one ResNet. How does the Transformer know which image and which position a token comes from? Positional encoding.
+- Self-attention lets "image patches near the gripper" and "joint state" look at each other directly, which a CNN alone cannot do.
 
-## 5. 本项目的训练配置
+### 4.3 Decoder
 
-| 参数 | 值 | 为什么 |
+```
+     100 queries (input all zeros, plus 100 learned positional embeddings)
+                         │
+     Transformer decoder (1 layer)
+       self-attention: the 100 queries look at each other (neighbouring time steps coordinate)
+       cross-attention: the queries look at the 602 encoder output tokens
+                         │
+     Linear(512 → 6) → action sequence â_{t:t+100}, 100 × 6
+```
+
+This is really **DETR**: DETR sends 100 "object queries" into the image features, each finding one object; ACT sends
+100 "time-step queries" into the observation features, each finding "how to move at step i".
+Unlike a language-model decoder there is **no causal mask and nothing autoregressive**: all 100 steps come out in parallel.
+
+PS: LeRobot's default decoder has a single layer. The original ACT code lists 7, but a bug there means only the first is
+used, and LeRobot matches that behaviour. 51.6M parameters in total, about 11M of them in ResNet18.
+
+### 4.4 What one training step does
+
+1. Sample a time $t$ from the dataset: two images, $s_t$, and the next 100 actions $a_{t:t+100}$ (near the end of an episode the missing steps are padded and masked out of the loss with `action_is_pad`).
+2. The CVAE encoder reads $(s_t, a_{t:t+100})$, outputs $\mu, \sigma$, and samples $z$.
+3. Main encoder + decoder predict $\hat a_{t:t+100}$ from (images, $s_t$, $z$).
+4. loss = L1 + 10 × KL, backprop, AdamW step.
+
+PS: joints and actions are mean/std-normalised with dataset statistics before entering the network, so the L1 is computed in normalised space and all 6 joints are on the same scale.
+
+## 5. Executing chunks at inference
+
+Default (`n_action_steps = 100`): predict 100 steps → execute all of them → look again and predict the next chunk.
+Limit: the policy only "looks" every 3.3 s, so it won't notice if the toy gets bumped in between, and the boundary between chunks can jump.
+
+So the paper has an optional alternative, **temporal ensembling**: predict a new 100-step chunk at **every** step. Then each time $t$
+gets predictions from several chunks, which are averaged with exponential weights $w_i = e^{-m \cdot i}$ ($i=0$ is the
+oldest prediction, $m$ = `temporal_ensemble_coeff`). Smoother and more reactive, at the cost of running the network every
+step (ACT is small enough for 30 Hz). Turn it on at deployment with `--policy.temporal_ensemble_coeff=0.01 --policy.n_action_steps=1`.
+
+## 6. Training config
+
+| Parameter | Value | Why |
 |---|---|---|
 | `policy.type` | `act` | |
-| `chunk_size` | 100（默认） | 3.3 秒，大约是一次"抓"或"放"的时长 |
-| `kl_weight` | 10（默认） | 论文值 |
-| `optimizer_lr` | 1e-5（默认，backbone 也是 1e-5） | 论文值；Transformer + 预训练 backbone，小学习率更稳 |
-| `batch_size` | 8 | 8 GB 显存下两路 480×640 图像的稳妥值 |
-| `steps` | 50,000 | 约 45 条 × 330 帧 ≈ 15k 帧，相当于约 27 个 epoch |
-| `save_freq` | 10,000 | 保存 5 个 checkpoint，可以比较不同训练阶段在真机上的效果 |
-| `dataset.eval_split` | 0.1 | 留出 10% 的 episode 做**验证集**，每 2000 步算一次验证 loss |
+| `chunk_size` | 100 (default) | 3.3 s, about one "grasp" or "place" |
+| `kl_weight` | 10 (default) | paper value |
+| `optimizer_lr` | 1e-5 (default; backbone also 1e-5) | paper value; a Transformer with a pretrained backbone is more stable with a small learning rate |
+| `batch_size` | 8 | safe for two 480×640 images on 8 GB |
+| `steps` | 50,000 | ~45 episodes × 330 frames ≈ 15k frames, about 27 epochs |
+| `save_freq` | 10,000 | 5 checkpoints |
+| `dataset.eval_split` | 0.1 | hold out 10% of episodes as a **validation set**, validation loss every 2000 steps |
 
-关于验证 loss：在模仿学习里，验证 loss 低**不等于**真机成功率高（误差累积只有在闭环里才出现），
-但它能告诉你是否严重过拟合。**最终以真机成功率为准**，这是后面要比较的指标。
+PS: in imitation learning a low validation loss **does not mean** a high real-robot success rate, because compounding error only shows up in closed loop.
+It only tells you whether you are badly overfitting. **The real-robot success rate is what counts.**
 
-## 6. 先跑一个冒烟测试（几分钟）
+## 7. Smoke test first (a few minutes)
 
-正式训练要好几个小时。先用 200 步确认整条管线（读数据 → 解码视频 → 前向反向 → 保存 checkpoint）
-在 Windows 上没问题，同时测出训练速度，以便估计总时长：
+Real training takes hours. So first run 200 steps to check that the whole pipeline (read data → decode video → forward/backward → save checkpoint) works on Windows, and measure the speed to estimate the total time:
 
 ```powershell
 .\scripts\train.ps1 act -Steps 200 -Name act_smoke -NoPush --eval_steps=100
 ```
 
-200 步结束时会保存一次 checkpoint，`--eval_steps=100` 让验证集评估也跑两次，
-这样管线的每个环节都被覆盖到。确认没问题后可以删掉 `outputs/train/act_smoke`。
+A checkpoint is saved at step 200 and `--eval_steps=100` runs validation twice, so every stage is covered. If it works, delete `outputs/train/act_smoke`.
 
-> **Windows 坑：符号链接权限。** LeRobot 每次保存 checkpoint 都会创建一个 `checkpoints/last`
-> 符号链接指向最新的 checkpoint，而 Windows 普通用户没有创建符号链接的权限（`WinError 1314`），
-> 训练会在**第一次保存时崩溃**。`scripts/train.ps1` 通过 `scripts/lerobot_train_win.py`
-> 启动训练，把这个链接换成不需要特权的**目录联接（junction）**，其他行为和 `lerobot-train` 完全一样。
-> （另一种解决办法是在 Windows 设置里打开"开发者模式"。）
->
-> 联接只能指向**绝对路径**：如果之后把整个项目文件夹挪到别处，旧 run 里的 `last` 会失效。
-> 这时直接用带编号的目录（如 `checkpoints/050000/pretrained_model`）即可，模型本身不受影响。
+PS (Windows): every time LeRobot saves a checkpoint it creates a symlink `checkpoints/last` pointing to the newest one, but
+a normal Windows user may not create symlinks (`WinError 1314`), so training **crashes at the first save**. That is why
+`scripts/train.ps1` starts training through `scripts/lerobot_train_win.py`, which replaces the link with a **directory junction**
+(no privilege needed); everything else behaves exactly like `lerobot-train`. A junction stores an **absolute path**, so if you
+move the project folder `last` breaks; then just use the numbered folder (e.g. `checkpoints/050000/pretrained_model`).
 
-实测（RTX 3070 Laptop，batch 8）：显存 3.7 GB，稳定后每步 0.28 秒（GPU 是瓶颈，数据加载不是）。
-混合精度（`--policy.use_amp=true`）没有加速，所以用默认 fp32。
+Speed (RTX 3070 Laptop, batch 8): 3.7 GB of VRAM, 0.28 s per step once warmed up; the bottleneck is the GPU, not data loading.
+Mixed precision (`--policy.use_amp=true`) gave no speed-up, so we keep the default fp32.
 
-> 前 100 步的日志里 `data_s` 会很大（约 1 秒），这是 Windows 上数据加载进程的**启动时间**（每个约 19 秒）
-> 被摊进了平均值，不是真的慢。看速度要看稳定之后的值。
+PS: in the first 100 steps `data_s` looks large (about 1 s). That is the **start-up time** of the data-loader processes on Windows averaged in, not real slowness. Read speeds after warm-up.
 
-## 6.5 训练前准备（笔记本）
+## 8. Before training (laptop)
 
-- **插着电源**：用电池时 GPU 会降频，速度可能慢一半。
-- **关闭自动睡眠**：Windows 设置 → 系统 → 电源 → "接通电源时进入睡眠"改成"从不"（屏幕可以关）。
-  睡眠会让训练停住。
-- 训练期间尽量不跑游戏、剪辑这类占 CPU/GPU 的程序；机械臂可以断电。
-- 关掉录数据时留下的 Rerun 窗口（它也占显存）。
+- **Plug in the charger**: on battery the GPU throttles and can be half as fast.
+- **Turn off sleep**: Windows Settings → System → Power → "When plugged in, put my device to sleep after" → Never (the screen may turn off). Sleep pauses training.
+- Don't run games or video editing while training; the arm can be powered off.
+- Close the Rerun window left from recording; it also uses VRAM.
 
-### 本地还是云端
-
-| 策略 | 参数量 | 训练位置 |
-|---|---|---|
-| ACT | 52M | 本地（RTX 3070 8 GB 足够） |
-| Diffusion Policy | 278M | 16 GB 以上显存（大学集群），见 05 |
-| SmolVLA | ~450M | 本地试小 batch，不行再上云 |
-| π₀.₅ | ~3B | 云端（官方示例按 80 GB 显卡配置） |
-
-云端用 LeRobot 自带的 Hugging Face Jobs：在训练命令后加 `--job.target=<显卡型号>`（例如 `a10g-small`），
-它会上传数据集、在云端训练、把模型推回你的 HF 账号。按小时计费，需要在 HF 账号里绑定付款方式；
-`hf jobs hardware` 可以列出可用显卡和价格。
-
-## 7. 正式训练
+## 9. Training
 
 ```powershell
 .\scripts\train.ps1 act
 ```
 
-等价的完整命令会以青色打印在终端开头。训练产物：
+The full equivalent command is printed in cyan at the top. Output:
 
 ```
 outputs/train/act_so101_pick_place/
-├── train_config.json                 本次训练的完整配置（可复现）
+├── train_config.json                 the full config of this run (reproducible)
 └── checkpoints/
-    ├── 010000/pretrained_model/      第 1 万步的模型
-    │   ├── model.safetensors         权重
-    │   ├── config.json               策略结构参数
+    ├── 010000/pretrained_model/      model at step 10k
+    │   ├── model.safetensors         weights
+    │   ├── config.json               policy architecture
     │   ├── train_config.json
-    │   └── policy_preprocessor*.json / policy_postprocessor*.json  归一化统计量等前后处理
+    │   └── policy_preprocessor*.json / policy_postprocessor*.json  normalisation stats and other pre/post-processing
     ├── 020000/ ...
-    └── last  →  指向最新的 checkpoint（目录联接）
+    └── last  →  the newest checkpoint (directory junction)
 ```
 
-训练结束后，模型会自动上传到 `https://huggingface.co/Yufeng1216/act_so101_pick_place`。
+When it finishes, the model is uploaded to `https://huggingface.co/Yufeng1216/act_so101_pick_place`.
 
-### 本项目的实际训练结果
-
-50,000 步用时 **4 小时 01 分**（3.7 步/秒），5 个 checkpoint 全部保存。验证集 loss（每 2000 步一次）：
-
-| 步数 | 2k | 4k | 6k | 8k | 10k | 20k | 30k | 40k | 50k |
-|---|---|---|---|---|---|---|---|---|---|
-| `eval_loss` | 0.406 | 0.405 | 0.396 | 0.379 | 0.385 | 0.387 | 0.380 | 0.387 | 0.381 |
-
-怎么读这张表：
-
-- 验证 loss **在 8k 步（约 4 个 epoch）后就基本不再下降**，之后一直在 0.38 附近小幅波动。
-  这和"模仿学习通常 5–10 个 epoch 就收敛"的经验一致。
-- 它也**没有上升**，所以继续训练没有造成明显的过拟合。
-- 但验证 loss 持平**不代表**后面的训练没用：训练 loss 还在降，动作可能变得更精细，
-  而这只有在真机闭环里才看得出来。所以真机评估时会对比 10k / 30k / 50k 三个 checkpoint。
-
-> 如果训练结束时上传失败（比如 HF 登录过期，报 `401`），模型仍完整保存在本地，重新登录后手动上传即可：
->
-> ```powershell
-> hf upload Yufeng1216/act_so101_pick_place outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model .
-> ```
->
-> 长时间训练前先运行 `hf auth whoami` 确认登录状态。
-
-中断了可以接着训：
+Interrupted? Resume:
 
 ```powershell
 .\scripts\train.ps1 act -Resume
 ```
 
-### 看训练曲线
+PS: if the upload at the end fails (e.g. the HF login expired, `401`), the model is still complete on disk. Log in again and upload by hand:
 
-训练用 Trackio 记录 loss，在另一个终端里运行：
+```powershell
+hf upload Yufeng1216/act_so101_pick_place outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model .
+```
+
+So before a long run, check the login with `hf auth whoami`.
+
+### Results
+
+50,000 steps in **4 h 01 min** (3.7 steps/s). Validation loss (every 2000 steps):
+
+| Step | 2k | 4k | 6k | 8k | 10k | 20k | 30k | 40k | 50k |
+|---|---|---|---|---|---|---|---|---|---|
+| `eval_loss` | 0.406 | 0.405 | 0.396 | 0.379 | 0.385 | 0.387 | 0.380 | 0.387 | 0.381 |
+
+- Validation loss **stops falling after about 8k steps (≈4 epochs)** and hovers around 0.38. That matches the rule of thumb that imitation learning converges in 5–10 epochs.
+- It **doesn't rise** either, so longer training did not cause visible overfitting.
+- But a flat validation loss **doesn't mean** the later steps were useless: training loss keeps falling and the motion may get finer, which only shows in closed loop on the robot.
+
+### Training curves
+
+Training logs to Trackio. In another terminal:
 
 ```powershell
 conda activate lerobot
 trackio show --project so101
 ```
 
-浏览器里会打开一个面板。重点看：
+A dashboard opens in the browser. Watch:
 
-- `train/loss`：总损失 = `l1_loss` + 10 × `kld_loss`，应该稳定下降
-- `train/l1_loss`：动作重建误差（归一化空间里），主要看它
-- `train/kld_loss`：应该很小但不为 0；如果一直是 0，说明 CVAE 的隐变量没被用上（posterior collapse）
-- `eval/loss`：验证集 loss。如果训练 loss 一直降、验证 loss 却开始上升，就是过拟合了
+- `train/loss`: total = `l1_loss` + 10 × `kld_loss`, should fall steadily
+- `train/l1_loss`: action reconstruction error (normalised space), the main one to watch
+- `train/kld_loss`: small but not 0. Stuck at 0 means the CVAE latent is unused (posterior collapse)
+- `eval/loss`: validation loss. Training loss keeps falling while validation loss rises = overfitting
 
-## 8. 在真机上运行
+## 10. Running on the robot
 
 ```powershell
 .\scripts\robot.ps1 rollout -Policy outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model -Duration 30
 ```
 
-`-Policy` 也可以填 Hub 上的模型名 `Yufeng1216/act_so101_pick_place`。不过在 Windows 上，LeRobot 可能把名字里的 `/`
-转成 `\` 导致找不到模型（训练时遇到过同样的问题，见 code_walkthrough 第 8 节），所以建议填本地路径。
+PS: `-Policy` also accepts the Hub name `Yufeng1216/act_so101_pick_place`. On Windows, though, LeRobot may turn the `/` in
+the name into `\` and fail to find the model (see code walkthrough §8), so a local path is safer.
 
-安全注意：
+Safety:
 
-- 第一次运行时手放在从臂电源旁边，策略可能做出意料之外的动作。
-- 策略启动时从臂会从当前姿态移动到策略输出的第一个动作，先把从臂摆在**起始姿态**。
-- 场景要和录数据时一样：相机位置、快递盒、标记点、光照都不要动。
+- The first time, keep a hand near the follower's power supply; the policy may do something unexpected.
+- At start the follower moves from wherever it is to the policy's first action, so put it in the **start pose** first.
+- The scene must match recording: camera positions, box, marks and lighting unchanged.
 
-试试 temporal ensembling：
+Try temporal ensembling:
 
 ```powershell
 .\scripts\robot.ps1 rollout -Policy outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model -Duration 30 --policy.temporal_ensemble_coeff=0.01 --policy.n_action_steps=1
 ```
 
-## 9. 评估
+## 11. Evaluation
 
-按 [08_evaluation.md](08_evaluation.md) 的协议：5 个标记点 × 每点 4 次 = 20 次，记录成功率。
-四个策略都用同一个协议，结果填进 README 的结果表。
+40 trials following the protocol in [08_evaluation.md](08_evaluation.md); the success rate goes into the README results table.

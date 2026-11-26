@@ -1,180 +1,250 @@
-# 05 · Diffusion Policy：用扩散模型生成动作
+# 05 · Diffusion Policy: generating actions with a diffusion model
 
-论文：Chi et al., *Diffusion Policy: Visuomotor Policy Learning via Action Diffusion*, RSS 2023
-（[arXiv:2303.04137](https://arxiv.org/abs/2303.04137)）。
+**English** · [简体中文](05_diffusion_policy.zh-CN.md)
 
-如果你学过图像扩散模型（DDPM、Stable Diffusion），这一篇几乎没有新概念：
-**把"生成一张图片"换成"生成一段动作序列"**，条件从"文字"换成"当前的图像和关节状态"。
+Paper: Chi et al., *Diffusion Policy: Visuomotor Policy Learning via Action Diffusion*, RSS 2023
+([arXiv:2303.04137](https://arxiv.org/abs/2303.04137)).
 
-## 1. 为什么要用扩散模型生成动作
+In one sentence: **take an image diffusion model and replace "generate an image" with "generate a segment of actions"**,
+and the condition "a sentence of text" with "the current images and joint state".
+Below we first build up diffusion models from scratch, then see how they are applied to actions.
 
-回顾 [04_act.md](04_act.md) 的第二个问题：**示范不一致**。同一个画面下，人有时从左边绕、有时从右边绕。
-这时正确的动作分布是**多峰的**（multimodal）：
+## 1. Why generate actions with a diffusion model
+
+Back to the second problem in [04_act.md](04_act.md): **inconsistent demos**. From the same view the human sometimes goes
+around on the left, sometimes on the right, so the right action distribution is **multimodal**:
 
 ```
-     概率
+     probability
       │   ▲               ▲
       │  ╱ ╲             ╱ ╲
       │ ╱   ╲           ╱   ╲
-      └────────────────────────── 动作
-        从左绕   (平均值)   从右绕
-                    ↑ MSE 回归会输出这里：直直撞上去
+      └────────────────────────── action
+       go left  (average)  go right
+                    ↑ MSE regression outputs this: straight into the obstacle
 ```
 
-- **MSE 回归**只能输出平均值，正好落在两个峰之间，是一个谁都没做过的动作。
-- **ACT** 用 CVAE 的隐变量 z 来区分不同的峰，但推理时固定 z = 0，表达能力有限。
-- **扩散模型**直接学习整个分布 $p(a \mid o)$，推理时从噪声出发**采样**，每次落在某一个峰上。
-  它本来就是为了生成多峰的高维数据（图像）而设计的。
+- **MSE regression** can only output the conditional mean, right between the two modes: an action nobody ever did.
+- **ACT** uses the CVAE latent $z$ to separate the modes, but fixes $z = 0$ at inference, which just picks one "standard style". Limited.
+- **A diffusion model** learns the whole distribution $p(A \mid O)$ and **samples** from it at inference, starting from noise and landing on one mode each time. It was designed to generate multimodal high-dimensional data (images) in the first place.
 
-## 2. 训练和推理
+So the question becomes: how do we learn a high-dimensional conditional distribution and sample from it?
 
-记 $A^0$ 为真实动作序列（horizon = 64 步 × 6 维），$O$ 为观测条件（最近 2 帧的图像特征 + 关节状态）。
+## 2. How a diffusion model (DDPM) works
 
-**训练**（和 DDPM 完全一样）：
+### 2.1 Starting point: turn "generation" into many small "denoising" steps
 
-1. 随机选一个噪声步数 $k \in \{1, \dots, 100\}$，采样噪声 $\epsilon \sim \mathcal N(0, I)$；
-2. 加噪：$A^k = \sqrt{\bar\alpha_k}\,A^0 + \sqrt{1-\bar\alpha_k}\,\epsilon$；
-3. 网络预测噪声，损失 $\mathcal L = \lVert \epsilon - \epsilon_\theta(A^k, k, O) \rVert^2$。
+Mapping $\mathcal N(0,I)$ to a sensible action segment in one step is hard (that is what GANs and VAEs try).
+DDPM's idea: if one step is too hard, split it into $K$ small steps, each removing only a little noise. Each small step is easy, so a network can learn it.
 
-**推理**：从纯噪声 $A^{100} \sim \mathcal N(0, I)$ 开始，用 $\epsilon_\theta$ 一步步去噪，得到 $A^0$。
-默认去噪 100 步，所以**推理比 ACT 慢得多**（ACT 只做一次前向）。这是扩散策略的主要代价。
+### 2.2 Forward process: add noise bit by bit (fixed, nothing learned)
 
-`prediction_type = epsilon`（预测噪声）、`beta_schedule = squaredcos_cap_v2`（余弦噪声表）
-都是 LeRobot 默认，也是论文的设置。
+Let the real action sequence be $A^0$ (64 steps × 6). Each step adds a little Gaussian noise:
 
-## 3. 三个时间长度：n_obs_steps、horizon、n_action_steps
+$$q(A^k \mid A^{k-1}) = \mathcal N\big(\sqrt{1-\beta_k}\,A^{k-1},\ \beta_k I\big),\qquad k = 1,\dots,K$$
 
-这是 Diffusion Policy 最容易混淆的地方。默认值是 2 / 64 / 32：
+$\beta_k$ are small fixed numbers (the noise schedule; here the cosine schedule `squaredcos_cap_v2`, $K=100$).
+Gaussian plus Gaussian is Gaussian, so we can jump to any step $k$ directly. With $\bar\alpha_k = \prod_{i\le k}(1-\beta_i)$:
+
+$$A^k = \sqrt{\bar\alpha_k}\,A^0 + \sqrt{1-\bar\alpha_k}\,\epsilon,\qquad \epsilon \sim \mathcal N(0, I)$$
+
+The larger $k$, the closer $\bar\alpha_k$ is to 0 and the closer $A^k$ is to pure noise. At $k = K$ it is essentially $\mathcal N(0,I)$.
+
+### 2.3 Reverse process: learn a denoiser
+
+Generation runs the forward process backwards: start from $A^K \sim \mathcal N(0,I)$ and denoise step by step back to $A^0$.
+Each reverse step is also approximately Gaussian, and its mean only depends on "how much noise is in this step". So we
+just train a network $\epsilon_\theta(A^k, k, O)$ to **predict the noise that was added**:
+
+$$\mathcal L = \mathbb E_{A^0,\,k,\,\epsilon}\Big[\big\| \epsilon - \epsilon_\theta(A^k, k, O) \big\|^2\Big]$$
+
+So one training step is:
+
+1. take a sample $(O, A^0)$ from the data, pick a random $k \in \{1,\dots,100\}$, sample $\epsilon$;
+2. add noise with the closed form above to get $A^k$;
+3. the network sees $(A^k, k, O)$, predicts $\epsilon$; compute the MSE.
+
+PS: it is still an MSE loss, but this time MSE does not average the modes away. The network predicts **one specific noise
+sample**, not the action itself; starting from different initial noise, the reverse process ends up on different modes.
+
+At inference (DDPM sampling), each step uses the predicted noise to compute the previous step's mean, plus a little fresh noise:
+
+$$A^{k-1} = \frac{1}{\sqrt{1-\beta_k}}\Big(A^k - \frac{\beta_k}{\sqrt{1-\bar\alpha_k}}\,\epsilon_\theta(A^k,k,O)\Big) + \sigma_k z,\quad z\sim\mathcal N(0,I)$$
+
+After 100 steps we have $A^0$. Limit: 100 network passes, **much slower than ACT (one forward pass)**. That is the main price of a diffusion policy.
+
+### 2.4 DDIM: same network, fewer steps
+
+DDIM (Song et al., 2021) showed that without changing training at all, you can swap the sampler for a **deterministic**
+update (no fresh noise $z$) that can **skip steps**, e.g. only 100 → 90 → … → 0, 10 steps. Each step first uses
+$\epsilon_\theta$ to estimate the clean $\hat A^0$, then computes $A$ at the target step directly:
+
+$$\hat A^0 = \frac{A^k - \sqrt{1-\bar\alpha_k}\,\epsilon_\theta}{\sqrt{\bar\alpha_k}},\qquad A^{k'} = \sqrt{\bar\alpha_{k'}}\,\hat A^0 + \sqrt{1-\bar\alpha_{k'}}\,\epsilon_\theta$$
+
+So DDIM is an inference-time speed-up for **the same trained model**, switched on with one flag. On the robot we use 10-step DDIM (§8).
+
+## 3. Applying it to actions: three time lengths
+
+How much time do the condition $O$ and the generated $A$ cover? This is the easiest part of Diffusion Policy to mix up. Defaults are 2 / 64 / 32:
 
 ```
-时间 →        t-1   t   t+1 ...                                   t+62
-观测          [■■■■■■]                                               n_obs_steps = 2：看最近 2 帧
-预测动作      [■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■]  horizon = 64：一次生成 64 步
-实际执行            [■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■]                n_action_steps = 32：只执行前 32 步
-                                                    ↑ 然后重新观测、重新生成
+time →        t-1   t   t+1 ...                                   t+62
+observe       [■■■■■■]                                               n_obs_steps = 2: look at the last 2 frames
+predict       [■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■]  horizon = 64: generate 64 steps at once
+execute             [■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■]                n_action_steps = 32: execute only the first 32
+                                                    ↑ then observe and generate again
 ```
 
-- **看 2 帧**：能从两帧的差异中读出速度信息，单帧做不到。
-- **生成 64 步，只执行 32 步**：后半段只是为了让前半段"知道之后要去哪"，保证连贯；
-  执行一半就重新规划，能及时修正。这就是论文说的 **receding horizon**（滚动时域），
-  和 ACT 的 action chunking 是同一个思想。
-- 30 Hz 下 32 步 ≈ 1 秒重新规划一次，比 ACT 默认的 3.3 秒频繁。
+- **2 frames**: the difference between two frames gives velocity; one frame can't.
+- **Generate 64, execute 32**: the second half only lets the first half "know where it is heading", for coherence; re-planning
+  halfway lets it correct in time. The paper calls this **receding horizon**; it is the same idea as ACT's action chunking.
+- 32 steps at 30 Hz ≈ re-planning every second, much more often than ACT's default 3.3 s.
 
-## 4. 网络结构
+PS: actions and states are min/max-normalised to [−1, 1] (not mean/std as in ACT) so they match the scale of $\mathcal N(0,I)$; samples are also clipped to [−1, 1] (`clip_sample`).
+
+## 4. Architecture
+
+Two parts: a condition encoder and a denoising network.
 
 ```
- top 图像   ─ ResNet18 ─ Spatial Softmax（32 个关键点）─┐
- wrist 图像 ─ ResNet18 ─ Spatial Softmax（32 个关键点）─┼─ 拼接 ×2 帧 ─▶ 全局条件向量 O
- 关节状态                                              ─┘
-                                                          │
- 噪声动作 A^k（64×6）──▶  1D 时序 U-Net  ◀──  FiLM 条件  ◀──┤
- 噪声步数 k ─ 正弦编码 ─────────────────────────────────────┘
+ top image   (3×240×320) ─ ResNet18 ─ Spatial Softmax (32 keypoints) ─ Linear ─ 64-D ─┐
+ wrist image (3×240×320) ─ ResNet18 ─ Spatial Softmax (32 keypoints) ─ Linear ─ 64-D ─┼─ concat = 134-D per frame
+ joint state (6)                                                                   ─┘     × 2 frames = 268-D
+                                                                                            │
+ noise step k ─ sinusoidal encoding ─ MLP ─ 128-D ───────────────────────────── concat ─▶ condition c (396-D)
+                                                                                            │
+ noisy actions A^k (64×6) ──▶  1D temporal U-Net (FiLM with c in every residual block)  ◀───┘
                  │
                  ▼
-          预测的噪声 ε（64×6）
+          predicted noise ε̂ (64×6)
 ```
 
-几个和图像扩散的对应关系：
+### 4.1 Condition encoder: ResNet18 + Spatial Softmax
 
-| 部件 | 图像扩散 | Diffusion Policy |
+Each camera has its own ResNet18 (`use_separate_rgb_encoder_per_camera`), initialised from ImageNet.
+Unlike ACT, the feature map is not flattened into tokens; it goes into a **Spatial Softmax**:
+
+1. a 1×1 conv turns the feature map into 32 channels, one per "keypoint";
+2. a softmax over space per channel gives a probability map $p_c(u, v)$;
+3. the expected coordinates $(\mathbb E[u], \mathbb E[v])$ are the keypoint's position.
+
+So each image becomes 32 (x, y) coordinates = 64 numbers. It says **where** things are rather than **what they look like**, which suits manipulation.
+PS: this comes from Levine et al.'s visuomotor policies; it lets the network learn 32 "points worth tracking" by itself.
+
+### 4.2 Denoiser: a 1D temporal U-Net
+
+U-Net is the structure from image segmentation and image diffusion: an encoder that downsamples, a decoder that upsamples,
+and skip connections between matching levels. Here 2D convolutions become **1D convolutions along time**, and the 6 joints are 6 input channels:
+
+```
+A^k (6 channels × 64 steps)
+  ├─ residual block ×2 (512 ch) ─────────────────────┐ skip
+  ├─ downsample (stride 2) → 32 steps                 │
+  ├─ residual block ×2 (1024 ch) ───────────┐ skip    │
+  ├─ downsample → 16 steps                  │         │
+  ├─ residual block ×2 (2048 ch)            │         │
+  ├─ middle residual block ×2               │         │
+  ├─ upsample → 32 steps, concat skip ◀─────┘         │
+  ├─ upsample → 64 steps, concat skip ◀───────────────┘
+  └─ 1D conv → 6 channels × 64 steps = ε̂
+```
+
+Each residual block is Conv1d (kernel 5) → GroupNorm → Mish, twice, plus a residual connection.
+Convolving along time naturally smooths neighbouring actions, and after downsampling the network sees the trend of the whole 64-step segment.
+
+### 4.3 Injecting the condition: FiLM
+
+The condition $c$ has to tell the U-Net "what is seen and how noisy this step is". Diffusion Policy uses **FiLM**
+(Feature-wise Linear Modulation): in every residual block a linear layer maps $c$ to a per-channel scale $\gamma$ and shift $\beta$, and
+
+$$h \leftarrow \gamma(c) \odot h + \beta(c)$$
+
+So the observation is not concatenated as an input; it "modulates" the gain and bias of every layer's features.
+
+| Part | Image diffusion (e.g. Stable Diffusion) | Diffusion Policy |
 |---|---|---|
-| 去噪网络 | 2D U-Net（在像素网格上卷积） | **1D U-Net**（沿时间轴卷积，通道 = 6 个关节） |
-| 条件注入 | cross-attention 注入文字 | **FiLM**：条件向量生成每层的缩放 γ 和偏移 β，$h \leftarrow \gamma \odot h + \beta$ |
-| 条件编码器 | CLIP 文本编码器 | 每路相机一个 ResNet18（`use_separate_rgb_encoder_per_camera`） |
+| What is generated | an image (2D pixel grid) | an action segment (64 steps × 6) |
+| Denoiser | 2D U-Net | **1D U-Net** (convolution along time) |
+| Condition | text, encoded by CLIP | images + joint state, encoded by ResNet18 + Spatial Softmax |
+| Injection | cross-attention | **FiLM** |
 
-**Spatial Softmax** 把 ResNet 的特征图变成 32 个"关键点"的 (x, y) 坐标：对每个通道做 softmax 得到
-一张概率图，再求坐标的期望。输出是"东西在哪里"，而不是"东西长什么样"，正适合操作任务。
+With the default `down_dims = (512, 1024, 2048)` there are about 278M parameters, almost all in the U-Net.
 
-默认的 U-Net 通道数 `down_dims = (512, 1024, 2048)` 让参数量达到约 2.8 亿，其中大部分在 U-Net 里。
+## 5. Training config
 
-## 5. 本项目的训练配置
-
-| 参数 | 值 | 为什么 |
+| Parameter | Value | Why |
 |---|---|---|
 | `policy.type` | `diffusion` | |
-| `n_obs_steps / horizon / n_action_steps` | 2 / 64 / 32（默认） | 论文值 |
-| `resize_shape` | **[240, 320]** | 把 480×640 缩小一半，像素少 4 倍。8 GB 显存放得下，训练也更快。论文本身用的分辨率更低（96×96 到 240×320） |
-| `crop_ratio` | **0.95** | 训练时随机裁出 95% 的区域（推理时裁中心）。这是论文里的**数据增强**，让模型对相机的轻微偏移更鲁棒 |
-| `ema.type` | **warmup** | 保存一份权重的**指数滑动平均**（EMA）。扩散模型的标准做法，EMA 权重生成的动作更平滑稳定 |
-| `optimizer_lr` | 1e-4，余弦退火，500 步预热（默认） | 论文值 |
-| `down_dims` | 512 / 1024 / 2048（默认） | 278M 参数，需要 16 GB 以上显存（见第 6 节） |
-| `batch_size` | 8 | 和 ACT 一样 |
-| `steps` | 100,000 | 扩散模型要学整个分布，比回归难，通常需要更多步；约 53 个 epoch |
-| `save_freq` | 20,000 | 5 个 checkpoint |
+| `n_obs_steps / horizon / n_action_steps` | 2 / 64 / 32 (default) | paper values |
+| `resize_shape` | **[240, 320]** | half of 480×640, 4× fewer pixels, much faster. The paper itself uses even lower resolutions (96×96 to 240×320) |
+| `crop_ratio` | **0.95** | random 95% crop in training (centre crop at inference). The paper's **data augmentation**, makes the model robust to small camera shifts |
+| `ema.type` | **warmup** | keep an **exponential moving average** of the weights (EMA). Standard for diffusion; EMA weights give smoother actions |
+| `optimizer_lr` | 1e-4, cosine, 500 warm-up steps (default) | paper values |
+| `down_dims` | 512 / 1024 / 2048 (default) | 278M parameters, needs 16 GB+ of VRAM (§6) |
+| `batch_size` | 8 | same as ACT |
+| `steps` | 100,000 | learning a whole distribution is harder than regression and usually takes more steps; about 53 epochs |
+| `save_freq` | 20,000 | 5 checkpoints |
 
-> **关于 EMA：** 开启后，checkpoint 里除了 `pretrained_model/`，还会多一个 `pretrained_model_ema/`。
-> 上传到 Hub 的是 EMA 权重，部署时也用 EMA 那份。
+PS: with EMA on, each checkpoint has a `pretrained_model_ema/` next to `pretrained_model/`. The EMA one is what gets uploaded and what we deploy.
 
-## 6. 显存：8 GB 放不下默认大小
+## 6. Memory: why not train on the laptop
 
-本项目训练的是**默认大小**（278M）。笔记本上实测（RTX 3070 Laptop，batch 8）：
+At the default size, fp32 weights, gradients, Adam's two states and the EMA copy alone take about 5.5 GB; add activations and an 8 GB laptop GPU can't hold it.
 
-| 配置 | 参数量 | 显存 | 每步 |
-|---|---|---|---|
-| 默认 U-Net `down_dims=(512,1024,2048)` | 278M | 超过 8 GB | 约 124 s（不可用） |
-| 通道减半 `down_dims=(256,512,1024)` | 89M | 2.9 GB | 0.13 s |
+PS: when VRAM runs out, Windows doesn't necessarily say `CUDA out of memory`. The driver moves what doesn't fit into system RAM;
+training runs without error but a hundred times slower (about 2 minutes per step here). So if `nvidia-smi` shows VRAM nearly full and `updt_s` in the log is huge, that's why.
 
-默认 U-Net 光是 fp32 的权重、梯度、Adam 状态和 EMA 副本就约 5.5 GB，再加激活值就超过 8 GB。
+So the default size trains on **a GPU with more memory** (a 16 GB V100 on a Slurm cluster). If you only have 8 GB and want to train locally,
+the diffusion preset in `train.ps1` halves the U-Net channels to (256, 512, 1024) (89M parameters, 2.9 GB, 0.13 s per step; the paper uses this size too), everything else unchanged.
 
-> **显存不够时，Windows 不一定报 `CUDA out of memory`**：驱动会把放不下的部分挪到系统内存，
-> 训练不报错，但慢上百倍。如果 `nvidia-smi` 显示显存几乎占满、日志里 `updt_s` 异常大，就是这个原因。
+## 7. Training (Linux GPU cluster)
 
-所以默认大小放到**更大显存的 GPU**（大学的 Slurm 集群，16 GB 以上）上训练。
-只有 8 GB 显卡又想在本地训，可以用 `train.ps1` 的 diffusion 预设：它把通道数减半（论文里也用过这组），
-其余设置相同。
-
-## 7. 正式训练（Linux GPU 集群）
-
-用 `cloud/slurm/` 里的脚本，参数和第 5 节一致。完整步骤见 [cloud/README.md](../cloud/README.md)，核心三步：
+Use the scripts in `cloud/slurm/`, with the settings of §5. Full steps in [cloud/README.md](../cloud/README.md); the core is three commands:
 
 ```bash
-bash cloud/slurm/setup_env.sh          # 一次性装环境
-bash cloud/slurm/submit.sh diffusion   # 提交训练任务
-tail -f logs/diffusion_<任务编号>.log   # 看训练日志
+bash cloud/slurm/setup_env.sh          # one-time environment setup
+bash cloud/slurm/submit.sh diffusion   # submit the training job
+tail -f logs/diffusion_<jobid>.log     # follow the log
 ```
 
-实测（Tesla V100 16 GB，batch 8）：
+Tesla V100 16 GB, batch 8:
 
-| `step_s`（每步） | `data_s`（等数据） | 显存 | 10 万步总时长 |
+| `step_s` (per step) | `data_s` (waiting for data) | VRAM | 100k steps |
 |---|---|---|---|
-| 0.127 s | 0.003 s | 6.5 GB | 约 4 小时（含验证） |
+| 0.127 s | 0.003 s | 6.5 GB | about 4 h (incl. validation) |
 
-- 集群任务有时长上限。被停掉后再运行一次 `submit.sh diffusion`，会从上一个 checkpoint 接着训。
-- Diffusion 的 `train/loss` 是噪声预测的 MSE，数值和 ACT 的 loss **不能直接比较**，只看它自己的趋势。
+- Cluster jobs have a time limit. When one is stopped, run `submit.sh diffusion` again and it continues from the last checkpoint.
+- Diffusion's `train/loss` is the noise-prediction MSE; it is **not comparable** with ACT's loss, only its own trend matters.
 
-训完把模型拷回笔记本（约 1 GB，只拷 EMA 权重，不拷优化器状态），在笔记本上运行：
-
-```powershell
-scp -r <用户名>@<集群传输节点>:~/Lerobot/outputs/train/diffusion_so101_pick_place/checkpoints/last/pretrained_model_ema outputs/train/diffusion_so101_pick_place/
-```
-
-本项目训好的模型：[Yufeng1216/diffusion_so101_pick_place](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place)。
-
-## 8. 在真机上运行
+Copy only the EMA weights back to the laptop (about 1 GB, no optimizer state). On the laptop:
 
 ```powershell
-.\scripts\robot.ps1 rollout -Policy outputs/train/diffusion_so101_pick_place/pretrained_model_ema -Duration 30
+scp -r <user>@<cluster-transfer-host>:~/Lerobot/outputs/train/diffusion_so101_pick_place/checkpoints/last/pretrained_model_ema outputs/train/diffusion_so101_pick_place/
 ```
 
-离线实测（RTX 3070 Laptop，拿数据集里的画面喂给模型）：
+Trained model: [Yufeng1216/diffusion_so101_pick_place](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place).
 
-| 采样器 | 每次生成 | 和示范动作的平均绝对误差（8 帧 × 6 个关节） |
+## 8. Running on the robot: use DDIM
+
+First measure speed offline by feeding dataset frames to the model (RTX 3070 Laptop):
+
+| Sampler | Per generation | Mean absolute error vs. the demo actions (8 frames × 6 joints) |
 |---|---|---|
-| DDPM 100 步（训练时的默认） | 约 1.5 s | 3.2 |
-| DDIM 10 步 | 约 0.16 s | 3.3 |
+| DDPM, 100 steps (training default) | about 1.5 s | 3.2 |
+| DDIM, 10 steps | about 0.16 s | 3.3 |
 
-每次生成 32 步动作（`n_action_steps`），30 Hz 下只够执行约 1.07 s。DDPM 100 步生成比执行还慢，
-从臂每执行完一段就要停下来等；DDIM 10 步快 10 倍，误差几乎不变，**真机上用 DDIM**：
+The 32 actions generated each time (`n_action_steps`) last only about 1.07 s at 30 Hz. 100-step DDPM is slower than that,
+so the arm would stop and wait after every segment; 10-step DDIM is 10× faster with practically the same error. So **use DDIM on the robot**:
 
 ```powershell
 .\scripts\robot.ps1 rollout -Policy outputs/train/diffusion_so101_pick_place/pretrained_model_ema -Duration 30 --policy.noise_scheduler_type=DDIM --policy.num_inference_steps=10
 ```
 
-单帧误差在 0.4 到 7 之间，示范刚开始、手臂从静止起步时肘关节偏差最大（十几到二十多）。
-这只是离线对比：起步时机本身就不确定，偏差大不一定是错；真正的指标是真机成功率。
+PS: per-frame errors range from 0.4 to 7; the largest is at the very start of a demo when the arm starts from rest (elbow off by 10–20+).
+When to start moving is genuinely uncertain, so a large error there isn't necessarily wrong. This is only an offline check; the real metric is the real-robot success rate.
 
-## 9. 和 ACT 对比时要看什么
+## 9. What to look at when comparing with ACT
 
-- **成功率**：同样按 [08_evaluation.md](08_evaluation.md) 跑 20 次。
-- **动作是否果断**：在毛绒玩具"抓左边还是抓右边都可以"的位置，ACT 可能犹豫，扩散策略应该更果断。
-- **推理延迟**：每次生成要多久，是否影响动作的连贯性。
+- **Success rate**: 40 trials following [08_evaluation.md](08_evaluation.md).
+- **Decisiveness**: at spots where "grasp from the left or from the right" both work, ACT may hesitate; the diffusion policy should commit.
+- **Inference latency**: how long each generation takes and whether it hurts smoothness.

@@ -1,119 +1,102 @@
-# 00 · Windows 环境搭建
+# 00 · Environment setup on Windows
 
-目标：在 **原生 Windows 11** 上装好 LeRobot 0.7.0 + 带 CUDA 的 PyTorch，能直接访问舵机串口和 USB 摄像头。
+**English** · [简体中文](00_environment.zh-CN.md)
 
-## 为什么不用 WSL2 / 虚拟机 / ROS
+Goal: LeRobot 0.7.0 and PyTorch with CUDA on **native Windows 11**, with direct access to the servo serial ports and the USB cameras.
 
-| 方案 | 舵机串口 | USB 摄像头 | CUDA 训练 |
+## Why not WSL2 / a VM / ROS
+
+Robot projects usually assume Linux, but what we actually need is just three things: serial ports, cameras and a GPU.
+So first check which option gives us all three:
+
+| Option | Servo serial port | USB camera | CUDA training |
 |---|---|---|---|
-| **原生 Windows** ✅ | COM 口直接可用 | OpenCV 直接可用 | 可用 |
-| WSL2 | 需要 `usbipd-win` 手动挂载 | 默认内核缺 UVC 驱动，需自编内核 | 可用 |
-| VMware 虚拟机 | USB 直通可用 | 可用 | **不可用**（虚拟机拿不到 GPU） |
+| **Native Windows** ✅ | COM ports work directly | OpenCV works directly | yes |
+| WSL2 | must be attached by hand with `usbipd-win` | the default kernel has no UVC driver, you build your own | yes |
+| VMware VM | USB pass-through works | yes | **no** (the VM cannot see the GPU) |
 
-LeRobot **完全不依赖 ROS**：舵机通过串口（pyserial）直接读写，摄像头走 OpenCV，
-数据集是 Parquet + MP4，训练是纯 PyTorch。所以 Windows 上没有 ROS 也不受影响。
+Only native Windows gets all three without extra work. And LeRobot itself **does not depend on ROS at all**: servos are
+read and written over pyserial, cameras go through OpenCV, datasets are Parquet + MP4, training is plain PyTorch.
+So having no ROS on Windows costs us nothing.
 
-## 1. 创建 conda 环境
+## 1. Create the conda environment
 
-LeRobot 0.7.0 要求 **Python ≥ 3.12**。`ffmpeg` 必须从 conda-forge 装进环境里，
-TorchCodec 解码视频时要用到它的 DLL。
+LeRobot 0.7.0 needs **Python ≥ 3.12**. `ffmpeg` has to come from conda-forge into the environment, because TorchCodec
+loads its DLLs to decode videos.
 
 ```powershell
 conda create -y -n lerobot -c conda-forge --override-channels python=3.12 ffmpeg=7.1.1
 conda activate lerobot
 ```
 
-> 如果中途报 `CondaHTTPError: HTTP 000 CONNECTION FAILED`，是网络抖动，直接重跑即可。
+PS: `CondaHTTPError: HTTP 000 CONNECTION FAILED` is just a network hiccup. Run it again.
 
-## 2. 安装带 CUDA 的 PyTorch
+## 2. Install PyTorch with CUDA
 
-**先装 PyTorch，再装 LeRobot**，否则 pip 可能装成 CPU 版。
-笔记本是 RTX 3070，驱动 596.x，用 CUDA 12.8 的轮子：
+Install **PyTorch first, then LeRobot**. The other way round, pip pulls in a CPU-only PyTorch on the way.
+The laptop has an RTX 3070 with driver 596.x, so we use the CUDA 12.8 build:
 
 ```powershell
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 ```
 
-## 3. 安装 LeRobot（固定版本）
+## 3. Install LeRobot (pinned)
 
 ```powershell
 pip install "lerobot[core-scripts,training,feetech,smolvla,pi,diffusion]==0.7.0"
 ```
 
-各个 extra 的作用：
-
-| extra | 内容 |
+| extra | What it brings |
 |---|---|
-| `core-scripts` | `lerobot-record` / `lerobot-teleoperate` 等命令行工具及其依赖（数据集、可视化、键盘监听） |
-| `training` | `lerobot-train`、accelerate、trackio 训练曲线 |
-| `feetech` | Feetech 舵机（SO-101 用的 STS3215）串口驱动 |
-| `diffusion` | Diffusion Policy 需要的 `diffusers` |
-| `smolvla` / `pi` | SmolVLA、π₀.₅ 需要的 `transformers` 等 |
+| `core-scripts` | the CLI tools (`lerobot-record`, `lerobot-teleoperate`, ...) and what they need: datasets, visualisation, keyboard listener |
+| `training` | `lerobot-train`, accelerate, trackio (training curves) |
+| `feetech` | serial driver for the Feetech servos (STS3215 on the SO-101) |
+| `diffusion` | `diffusers`, for Diffusion Policy |
+| `smolvla` / `pi` | `transformers` and friends, for SmolVLA and π₀.₅ |
 
-> 固定 `==0.7.0` 是为了可复现：LeRobot 迭代很快，命令行参数在小版本之间也会变。
+PS: the version is pinned to `==0.7.0` for reproducibility. LeRobot moves fast, and CLI flags change even between minor versions.
 
-## 4. 验证
+## 4. Check
 
 ```powershell
 python -c "import torch, lerobot; print(torch.__version__, torch.cuda.is_available(), lerobot.__version__)"
 ```
 
-应看到 `True` 和 `0.7.0`。
+`True` and `0.7.0` means you are good.
 
-## 5. 登录 Hugging Face（录数据前需要）
+## 5. Log in to Hugging Face
 
-数据集和模型都推到 Hugging Face Hub。去 <https://huggingface.co/settings/tokens> 创建一个
-**write** 权限的 token，然后：
+Datasets and models live on the Hugging Face Hub. Create a token with **write** access at
+<https://huggingface.co/settings/tokens>, then:
 
 ```powershell
 hf auth login
 hf auth whoami
 ```
 
-把用户名写进 `config/robot.json` 的 `hf_user` 字段。**token 不要写进任何仓库文件。**
+Put your user name in `hf_user` in `config/robot.json`. **Never write the token into any file in the repo.**
 
-> `hf auth login` 要在 `lerobot` 环境里运行（`conda activate lerobot` 之后）。
-> 如果在 conda 的 base 环境里运行，用的是另一个版本的 `hf`。
+PS: run `hf auth login` inside the `lerobot` environment. From conda's base environment you get a different `hf`.
 
-## 6. 项目放在哪里
+## 6. Where to put the project
 
-项目文件夹是 `D:\桌面\Lerobot`，**不要放在 OneDrive 等同步盘里**：训练时每个 checkpoint 有几百 MB 到
-几 GB，同步软件会一边训练一边上传，还可能在写文件时锁住文件导致训练报错。需要备份时，训练结束后再手动复制。
+**Not in a synced folder like OneDrive.** Each training checkpoint is hundreds of MB to several GB; the sync client
+uploads them while training runs, and can lock a file while it is being written, which crashes the run.
+If you want a backup, copy it by hand after training.
 
-`scripts/env.ps1` 让 LeRobot 把数据集存进项目的 `data/`、标定存进 `config/calibration/`
-（默认它们会放在全局缓存 `$HF_HOME/lerobot` 里）。下载的预训练模型仍然放在全局缓存，因为那是共享的下载，不属于本项目。
+`scripts/env.ps1` makes LeRobot keep datasets in the project's `data/` and calibration files in `config/calibration/`
+(by default both go to the global cache `$HF_HOME/lerobot`). Downloaded pretrained models stay in the global cache,
+since they are shared by every project.
 
-## 7. Git 和 GitHub
+## 7. Get the code
 
-代码和教程放 GitHub，数据集和模型放 Hugging Face Hub（GitHub 单文件限制 100 MB）。
-
-### 第一次上传
-
-1. 在 <https://github.com/new> 新建仓库（本项目：`Yufeng1216/Lerobot_so101`，先设为 Private，有结果后再公开）。
-   如果勾选了 "Add a license"，GitHub 会先生成一次提交，本地要先接上它再推送（见下面第 3 步）。
-2. 本地初始化并提交：
+Code and docs are on GitHub; datasets and models are on the Hugging Face Hub (GitHub caps a single file at 100 MB).
 
 ```powershell
-cd D:\桌面\Lerobot
-git init -b main
-git add -A
-git commit -m "Initial project setup"
-git remote add origin https://github.com/Yufeng1216/Lerobot_so101.git
+git clone https://github.com/Yufeng1216/Lerobot_so101.git
+cd Lerobot_so101
+copy config\robot.example.json config\robot.json   # then fill in your COM ports, camera indices and HF user
 ```
 
-3. 如果远程已经有提交（比如 LICENSE），先把本地提交"接"在它后面，再推送：
-
-```powershell
-git fetch origin
-git rebase origin/main
-git push -u origin main
-```
-
-`rebase` 的意思是：把我本地的提交挪到远程最新提交的后面，历史保持一条直线，不会覆盖远程的任何东西。
-
-### 登录 GitHub
-
-- Windows 版 Git 自带 **Git Credential Manager (GCM)**：第一次 `git push` 时会打开浏览器授权，
-  授权后跳到一个 `127.0.0.1:xxxx/?code=...` 的**空白页，这是正常的**，关掉即可。
-- 远程地址里**不要带用户名**（写成 `https://github.com/<用户>/<仓库>.git`），否则 GCM 可能要求重复登录。
-- 私有仓库报 "Repository not found"：要么仓库还没建，要么当前登录的账号没有权限。
+PS: Git for Windows ships Git Credential Manager. The first `git push` opens a browser to authorise; afterwards it
+lands on a blank `127.0.0.1:xxxx/?code=...` page. That is expected, just close it.

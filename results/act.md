@@ -1,30 +1,31 @@
-# ACT 真机评估（前 10 次，2026-11-24；其余待测）
+# ACT real-robot evaluation (first 10 trials, 2026-11-24; the rest to follow)
 
-- 模型：`outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model`（50k 步，[Hub](https://huggingface.co/Yufeng1216/act_so101_pick_place)）
-- 协议：[docs/08_evaluation.md](../docs/08_evaluation.md)：晚上只开台灯、拉窗帘（和录示范时一样）；计划 5 个点 × 8 轮，每次最长 30 秒；
-  和 Diffusion **按组轮流**（ACT 5 次 → Diffusion 5 次 → …），"第 k 组"是 ACT 自己的第 k 组
-- 录像：本地数据集 `Yufeng1216/rollout_eval_act`（`data/` 下，10 条）
-- 结果：✅ 成功 / 🟡 部分成功（抓起没放进） / ❌ 失败（没抓起）
-- "时长"是这条 episode 录了多久：成功后按 → 提前结束，所以成功试验的时长 ≈ 完成用时
+**English** · [简体中文](act.zh-CN.md)
 
-| # | 点位 | 结果 | 时长 (s) | 备注 |
+- Model: `outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model` (50k steps, [Hub](https://huggingface.co/Yufeng1216/act_so101_pick_place))
+- Protocol: [docs/08_evaluation.md](../docs/08_evaluation.md): night, desk lamp only, curtains closed (as when the demos were recorded); 5 spots × 8 rounds, at most 30 s per trial. Trials 1–10 alternated with Diffusion every 5 trials; trials 11–40 run in one go
+- Recording: local dataset `Yufeng1216/rollout_eval_act` (under `data/`, 10 episodes)
+- Result: ✅ success / 🟡 partial (grasped, not placed) / ❌ failure (not grasped)
+- "Time" is how long the episode was recorded: after a success → ends it early, so for successes it ≈ the time to finish
+
+| # | Spot | Result | Time (s) | Note |
 |---|---|---|---|---|
-| 1 | ① | ❌ | 28.9 | 第 1 组 |
-| 2 | ② | ❌ | 29.6 | 第 1 组 |
-| 3 | ③ | ❌ | 29.5 | 第 1 组 |
-| 4 | ④ | ✅ | 9.9 | 第 1 组 |
-| 5 | ⑤ | ✅ | 14.9 | 第 1 组 |
-| 6 | ① | ❌ | 29.2 | 第 2 组 |
-| 7 | ② | ❌ | 29.3 | 第 2 组 |
-| 8 | ③ | ❌ | 29.6 | 第 2 组 |
-| 9 | ④ | ✅ | 12.3 | 第 2 组 |
-| 10 | ⑤ | ✅ | 12.9 | 第 2 组 |
+| 1 | ① | ❌ | 28.9 | block 1 |
+| 2 | ② | ❌ | 29.6 | block 1 |
+| 3 | ③ | ❌ | 29.5 | block 1 |
+| 4 | ④ | ✅ | 9.9 | block 1 |
+| 5 | ⑤ | ✅ | 14.9 | block 1 |
+| 6 | ① | ❌ | 29.2 | block 2 |
+| 7 | ② | ❌ | 29.3 | block 2 |
+| 8 | ③ | ❌ | 29.6 | block 2 |
+| 9 | ④ | ✅ | 12.3 | block 2 |
+| 10 | ⑤ | ✅ | 12.9 | block 2 |
 
-## 汇总（有效的 10 次）
+## Summary (first 10 trials)
 
-| 指标 | 值 |
+| Metric | Value |
 |---|---|
-| **成功率** | **4/10 = 40%**（95% 区间 17–69%） |
-| 部分成功 | 0/10 |
-| 失败（没抓起） | 6/10 |
-| 各点位成功 | ① 0/2 · ② 0/2 · ③ 0/2 · ④ 2/2 · ⑤ 2/2 |
+| **Success rate** | **4/10 = 40%** (95% CI 17–69%) |
+| Partial | 0/10 |
+| Failure (not grasped) | 6/10 |
+| Success per spot | ① 0/2 · ② 0/2 · ③ 0/2 · ④ 2/2 · ⑤ 2/2 |

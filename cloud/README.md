@@ -1,5 +1,7 @@
 # Remote training
 
+**English** · [简体中文](README.zh-CN.md)
+
 Everything in `scripts/` runs on the Windows laptop (robot, recording, local training, deployment).
 This folder holds what runs **elsewhere**, for policies that do not fit the laptop's 8 GB GPU.
 

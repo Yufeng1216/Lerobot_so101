@@ -1,161 +1,217 @@
-# 06 · SmolVLA：小型视觉-语言-动作模型
+# 06 · SmolVLA: a small vision-language-action model
 
-论文：Shukor et al., *SmolVLA: A Vision-Language-Action Model for Affordable and Efficient Robotics*, 2025
-（[arXiv:2506.01844](https://arxiv.org/abs/2506.01844)）。
+**English** · [简体中文](06_smolvla.zh-CN.md)
 
-前两个策略（ACT、Diffusion）都是**从零开始**、只用我们的 50 条示范训练。SmolVLA 不一样：
-它是一个**预训练好的大模型**，我们只做**微调**（fine-tuning）。这和 NLP 里"拿预训练的 BERT / LLM 在自己的数据上微调"是同一个思路。
+Paper: Shukor et al., *SmolVLA: A Vision-Language-Action Model for Affordable and Efficient Robotics*, 2025
+([arXiv:2506.01844](https://arxiv.org/abs/2506.01844)).
 
-## 1. VLA 是什么
+The first two policies (ACT, Diffusion) are trained **from scratch** on our 50 demos only. SmolVLA is different: it is a
+**pretrained large model**, and we only **fine-tune** it. It is really the same idea as in NLP, "pretrain on a big corpus,
+then fine-tune on your task", except that the corpus is robot data.
 
-**VLA = Vision-Language-Action**：输入图像和一句自然语言指令，输出机器人动作。
+## 1. What a VLA is
+
+**VLA = Vision-Language-Action**: images and a natural-language instruction in, robot actions out.
 
 ```
-图像（俯视 + 腕部） ┐
-任务指令（文字）    ├─▶  VLA  ─▶  未来 50 步的关节动作
-关节状态           ┘
+images (top + wrist)  ┐
+instruction (text)    ├─▶  VLA  ─▶  the next 50 joint actions
+joint state           ┘
 ```
 
-和 ACT / Diffusion 的区别：
+The starting point: a VLM (vision-language model) has already learned to "understand a scene" and "follow an instruction"
+from huge amounts of image-text data. So rather than learning vision from scratch for a robot policy, use the VLM as the
+backbone and attach a module that outputs actions.
 
 | | ACT / Diffusion | SmolVLA |
 |---|---|---|
-| 初始化 | 只有图像编码器（ResNet18）用 ImageNet 预训练 | **整个模型**在大量社区机器人数据上预训练过 |
-| 输入 | 图像 + 关节状态 | 图像 + 关节状态 + **语言指令** |
-| 训练 | 从零开始 | 在预训练权重上微调 |
+| Initialisation | only ResNet18 is pretrained (ImageNet) | the VLM is pretrained on image-text data, and **the whole VLA** is pretrained again on community robot data |
+| Input | images + joint state | images + joint state + **language instruction** |
+| Training | from scratch | fine-tuned from pretrained weights |
 
-本项目只有一个任务，语言指令始终是同一句话（"Pick up the blue plush toy and place it in the cardboard box."），
-所以语言在这里发挥不了"区分任务"的作用。我们关心的是：**预训练带来的先验，能不能让 50 条示范学得更好**。
+PS: we only have one task, and the instruction is always the same sentence ("Pick up the blue plush toy and place it in the cardboard box."),
+so language can't "tell tasks apart" here. What we care about is whether **the prior from pretraining helps learn better from 50 demos**.
 
-## 2. 结构：VLM + 动作专家
+## 2. Overall structure: the VLM handles the prefix, the action expert the suffix
 
-SmolVLA 由两部分组成（约 4.5 亿参数）：
+SmolVLA (~450M parameters) is two Transformers running **side by side, layer by layer**:
 
 ```
- 图像 ─ SigLIP 视觉编码器 ─┐
- 指令 ─ 分词 ──────────────┼─▶ SmolVLM2（语言模型，只用前 16 层）─▶ 每层的特征
- 关节状态 ─ Linear ────────┘                                         │
-                                                                     ▼（交叉注意力）
- 噪声动作 + 时间 t ─────────────────────────────▶ 动作专家（小 Transformer）─▶ 速度场 v
+ prefix: processed by the VLM                   suffix: processed by the action expert
+┌───────────────────────────────────────────┐   ┌──────────────────────────────┐
+│ image tokens (64 each) × 2 cameras         │   │ 50 action tokens              │
+│ instruction tokens (up to 48)              │   │ = noisy actions + encoding    │
+│ state token (1)                            │   │   of the time t               │
+└───────────────────────────────────────────┘   └──────────────────────────────┘
+        first 16 layers of SmolVLM2 (width 960) ◀──attention──▶ action expert, 16 layers (width 720)
+                                                                   │
+                                                     Linear → velocity field v, 50 × 6
 ```
 
-1. **VLM（视觉语言模型）**：SmolVLM2-500M。图像经 SigLIP 编码成视觉 token，和指令的文字 token 一起送进语言模型。
-   为了快，只用语言模型的**前 16 层**（论文发现中间层的特征对动作已经足够）。
-2. **动作专家（action expert）**：一个更小的 Transformer（宽度是 VLM 的 0.75 倍），
-   交替使用**交叉注意力**（看 VLM 的特征）和**自注意力**（动作 token 之间互相看）。
+Let's take it apart piece by piece.
 
-### Flow matching：和 Diffusion 很像，但更直接
+### 2.1 The VLM: SmolVLM2-500M
 
-动作专家用 **flow matching** 生成 50 步的动作块，可以看成 Diffusion 的"直线版"：
+A VLM is really "ViT + projection + language model":
 
-- 训练：在真实动作 $A$ 和噪声 $\epsilon$ 之间取一个点 $A^t = t\,\epsilon + (1-t)\,A$，
-  让网络预测从噪声指向数据的**速度** $v = \epsilon - A$，损失是 $\lVert v_\theta(A^t, t, O) - v \rVert^2$。
-- 推理：从纯噪声出发，沿预测的速度场积分 **10 步**（`num_steps=10`）得到动作。
-  Diffusion Policy 默认要去噪 100 步，所以 SmolVLA 推理快得多。
+1. **Vision encoder SigLIP** (a ViT, 12 layers, width 768): the image is resized and padded to 512×512 and cut into 16×16 patches: 32×32 = 1024 patch tokens.
+2. **Pixel shuffle**: 1024 tokens is too many for the language model. So each 4×4 group of neighbouring tokens is stacked along the channel dimension: 1024 / 16 = **64 tokens**, each 16× wider.
+   It trades space for channels; no information is lost, only rearranged.
+3. **Projection (connector)**: a linear layer maps the 64 tokens to the language model's width (960), so image tokens and word tokens live in the same embedding space and can be concatenated into one sequence.
+4. **Language model SmolLM2** (32 layers, width 960, 15 attention heads, 5 KV heads, i.e. GQA): SmolVLA **only uses the first 16 layers**.
+   The paper found the middle layers' features are already enough for actions; dropping half the layers makes inference twice as fast.
 
-## 3. 微调时训练哪些部分
+The joint state (6-D, zero-padded to 32) goes through a linear layer `state_proj` into **1 token** at the end of the prefix.
 
-默认配置（我们不改）：
+### 2.2 The action expert
 
-| 部分 | 是否训练 | 配置项 |
+The action expert is also a Transformer, with as many layers as the VLM (16) but 0.75× its width (720). Its input is 50 action tokens:
+
+- the noisy actions (50 × 32; 6-D zero-padded to 32) go through `action_in_proj` into 50 vectors of 720-D;
+- the time $t$ gets a sinusoidal encoding, concatenated to each action vector, then a two-layer MLP. So every action token "knows" how noisy it is.
+
+At the output, `action_out_proj` maps the 50 tokens back to 50 × 32; the first 6 dimensions are the predicted velocity field $v$.
+
+### 2.3 How the two Transformers talk: alternating cross- and self-attention
+
+In every layer the VLM first computes K and V for the prefix tokens. The expert's layer is one of two kinds:
+
+- **cross-attention layer**: the action tokens' Q attends to the **prefix**'s K and V (mapped to the expert's width by a linear layer). In words: "decide the action from the view, the instruction and the state".
+- **self-attention layer** (every other layer): action and prefix tokens attend jointly, so action tokens also see each other and the 50 steps stay coordinated.
+
+On top of that there is a mask rule ("block-causal"):
+
+| Who sees whom | images + instruction | state | actions |
+|---|---|---|---|
+| images + instruction | ✓ (each other) | ✗ | ✗ |
+| state | ✓ | ✓ | ✗ |
+| actions | ✓ | ✓ | itself and earlier actions only |
+
+**The prefix never sees the actions.** That matters: at inference the prefix is computed **once** (kept as a KV cache), and the 10 denoising steps only run the action expert, which is fast.
+
+## 3. Flow matching: the "straight-line" diffusion
+
+The action expert generates the chunk with **flow matching**. Same idea as diffusion, "go from noise to data", but along a simpler path.
+
+### 3.1 Starting point
+
+DDPM's noising path is curved ($\sqrt{\bar\alpha_k}$ and $\sqrt{1-\bar\alpha_k}$ change non-linearly), so inference needs many small steps.
+So why not let noise and data be connected by a **straight line**?
+
+### 3.2 Training
+
+Take a real action chunk $A$ and noise $\epsilon \sim \mathcal N(0, I)$ and interpolate linearly ($t=1$ is pure noise, $t=0$ is data):
+
+$$A^t = t\,\epsilon + (1-t)\,A$$
+
+The velocity along that line is constant, $\frac{dA^t}{dt} = \epsilon - A$. So the network predicts that velocity:
+
+$$\mathcal L = \big\| v_\theta(A^t, t, O) - (\epsilon - A) \big\|^2$$
+
+$t$ is not sampled uniformly but from Beta(1.5, 1), **favouring the noisy end** ($t$ near 1), because that end is the hardest: deciding, from a blob of noise, which mode to head for.
+
+### 3.3 Inference
+
+Start from $A^1 = \epsilon$ and integrate the velocity field with Euler's method for 10 steps (`num_steps = 10`, step $\Delta t = -0.1$):
+
+$$A^{t+\Delta t} = A^t + \Delta t \cdot v_\theta(A^t, t, O)$$
+
+| | DDPM (Diffusion Policy) | Flow matching (SmolVLA) |
 |---|---|---|
-| SigLIP 视觉编码器 | 冻结 | `freeze_vision_encoder=True` |
-| 语言模型 | 冻结 | `train_expert_only=True` |
-| 动作专家 | **训练** | |
-| 关节状态的投影层 | **训练** | `train_state_proj=True` |
+| What the network predicts | the added noise $\epsilon$ | the velocity from data to noise, $\epsilon - A$ |
+| Noising path | curved (set by the noise schedule) | straight |
+| Inference steps | 100 by default (10 with DDIM) | 10 |
 
-只训练约 1 亿参数，所以虽然模型有 4.5 亿参数，梯度和优化器状态只占一小部分显存。
+PS: the path is straight, so a few large steps don't add much error; that's why flow matching is fast at inference. It is just as multimodal as diffusion, because every sample starts from different noise.
 
-## 4. 相机名对应：`rename_map`
+## 4. What gets trained during fine-tuning
 
-预训练模型认识的相机名是 `camera1`、`camera2`、`camera3`，我们的数据集里叫 `top` 和 `wrist`。
-用 `--rename_map` 告诉 LeRobot 怎么对应：
+Defaults (we keep them):
 
-| 我们的相机 | 对应到 | 为什么 |
+| Part | Trained? | Setting |
 |---|---|---|
-| `observation.images.top` | `observation.images.camera1` | 预训练数据里 camera1 多是俯视或正面视角 |
-| `observation.images.wrist` | `observation.images.camera2` | camera2 多是腕部视角 |
-| （没有） | `camera3` | 缺少的相机直接跳过 |
+| SigLIP vision encoder | frozen | `freeze_vision_encoder=True` |
+| language model (first 16 layers) | frozen | `train_expert_only=True` |
+| action expert | **trained** | |
+| state/action projections, time MLP | **trained** | `train_state_proj=True` |
 
-## 5. 本项目的训练配置
+About 100M parameters are trained. So although the model has 450M, gradients and optimizer state only take a small share of memory.
+PS: it is the same idea as LoRA: freeze the big model's general knowledge and train only a small part to adapt to the new task.
 
-| 参数 | 值 | 为什么 |
+## 5. Camera names: `rename_map`
+
+The pretrained model knows cameras called `camera1`, `camera2`, `camera3`; our dataset calls them `top` and `wrist`. `--rename_map` tells LeRobot how they match:
+
+| Our camera | Mapped to | Why |
 |---|---|---|
-| `policy.path` | `lerobot/smolvla_base` | 从官方预训练权重开始（不是 `policy.type`，那样会从零训练） |
-| `rename_map` | top → camera1，wrist → camera2 | 见第 4 节 |
-| `batch_size` | 8（集群上 32，见第 7 节） | 官方示例用 64，8 GB 显存放不下；batch 小，学习率不变，步数相应多一些 |
-| `steps` | 30,000 | 约 16 个 epoch |
-| `scheduler_decay_steps` | 和 `steps` 相同 | 默认按 3 万步衰减学习率，改步数时要一起改 |
-| `save_freq` | 10,000 | 3 个 checkpoint |
-| 其余 | 默认 | 学习率 1e-4，1000 步预热，余弦衰减到 2.5e-6 |
+| `observation.images.top` | `observation.images.camera1` | camera1 is mostly an overhead or front view in the pretraining data |
+| `observation.images.wrist` | `observation.images.camera2` | camera2 is mostly a wrist view |
+| (none) | `camera3` | missing cameras are skipped |
 
-## 6. 冒烟测试
+PS: `rename_map` is saved in the model's preprocessing config (`policy_preprocessor.json`), so it applies automatically at deployment.
+
+## 6. Training config
+
+| Parameter | Value | Why |
+|---|---|---|
+| `policy.path` | `lerobot/smolvla_base` | start from the official pretrained weights (not `policy.type`, which would train from scratch) |
+| `rename_map` | top → camera1, wrist → camera2 | see §5 |
+| `batch_size` | 32 | the official example uses 64; 32 fits a 16 GB V100 |
+| `steps` | 20,000 | 640k samples, about 43 epochs |
+| `scheduler_decay_steps` | same as `steps` | the default decays over 30k steps; change both together |
+| `save_freq` | 5,000 | resubmitting after a cluster time-out loses at most 5k steps |
+| rest | default | lr 1e-4, 1000 warm-up steps, cosine decay to 2.5e-6 |
+
+PS: on the laptop (8 GB) batch 32 doesn't fit (VRAM spills into system RAM and gets thousands of times slower); batch 8 works (0.35 s per step, 2.9 GB).
+So `train.ps1 smolvla` is a laptop version with batch 8 and 30k steps; the real model was trained on the cluster with batch 32.
+
+## 7. Training
+
+Smoke test first. The first run downloads the pretrained model (about 2 GB, into the Hugging Face cache):
 
 ```powershell
 .\scripts\train.ps1 smolvla -Steps 300 -Name smolvla_smoke -NoPush --eval_steps=150 --trackio.enable=false
 ```
 
-第一次运行会下载预训练模型（约 2 GB），存在 Hugging Face 的缓存目录里。
+The real run is on the cluster (see [cloud/README.md](../cloud/README.md)):
 
-实测（RTX 3070 Laptop）：
-
-| batch | 每步耗时 | 显存 | 结论 |
-|---|---|---|---|
-| 8 | 0.35 s | 2.9 GB | 可用；300 步内 eval_loss 0.465 → 0.379 |
-| 32 | 约 800 s | 7.85 GB | 超出 8 GB，Windows 偷用内存，慢 2000 倍，不可用 |
-
-可训练参数 100M / 总参数 450M。batch 8 跑 3 万步约 3 小时。
-
-## 7. 正式训练
-
-两种做法，配置不同：
-
-| | 笔记本（8 GB） | GPU 集群（16 GB V100） |
-|---|---|---|
-| batch | 8 | 32 |
-| 步数 | 30,000 | 20,000（样本数约为笔记本的 2.7 倍） |
-| save_freq | 10,000 | 5,000（超时重提交最多损失 5k 步） |
-| 实测每步 | 0.35 s | 2.47 s（V100 没有 bf16 加速），2 万步约 14 小时：8 小时超时后再提交一次，自动续训 |
-| 命令 | `.\scripts\train.ps1 smolvla` | `bash cloud/slurm/submit.sh smolvla` |
-
-笔记本：
-
-```powershell
-hf auth whoami
-.\scripts\train.ps1 smolvla
+```bash
+bash cloud/slurm/submit.sh smolvla
 ```
 
-集群：用法见 [`cloud/README.md`](../cloud/README.md)。V100 不原生支持 bfloat16（SmolVLA 的 VLM 部分用 bf16 存），能跑但会慢一些，开始后先看日志里的 `step_s`。训练完只把部署要用的 `pretrained_model` 拷回笔记本（约 0.9 GB，不含优化器状态），在**笔记本**上运行：
+PS: the V100 has no native bfloat16 (SmolVLA keeps its VLM in bf16); it works but is slower: 2.47 s per step, about 14 h for 20k steps.
+After the 8 h time-out, submit again and it continues automatically.
+
+Copy back only the `pretrained_model` needed for deployment (about 0.9 GB, no optimizer state). On the **laptop**:
 
 ```powershell
-scp -r <用户名>@<集群传输节点>:~/Lerobot/outputs/train/smolvla_so101_pick_place/checkpoints/020000/pretrained_model outputs/train/smolvla_so101_pick_place/
+scp -r <user>@<cluster-transfer-host>:~/Lerobot/outputs/train/smolvla_so101_pick_place/checkpoints/020000/pretrained_model outputs/train/smolvla_so101_pick_place/
 ```
 
-### 训练结果
+### Results
 
-- 2 万步训满，两次提交（第一次 8 小时超时，第二次自动续训），V100 上共约 14 小时。
-- **离线检查**：从 5 条示范里各取一帧（抓取前、抓取中、搬运中、放下时），预测 50 步动作块，和示范里记录的动作比，
-  每个关节的平均绝对误差（度；夹爪是 0–100）：
+- All 20k steps done, about 14 h on the V100.
+- **Offline check**: one frame from each of 5 demos (before grasp, grasping, carrying, releasing); predict a 50-step chunk and compare with the recorded actions.
+  Mean absolute error per joint (degrees; gripper 0–100):
 
-| | 底座 | 大臂 | 小臂 | 腕俯仰 | 腕旋转 | 夹爪 | 平均 |
+| | pan | lift | elbow | wrist flex | wrist roll | gripper | mean |
 |---|---|---|---|---|---|---|---|
-| SmolVLA 预测 | 1.4 | 3.0 | 2.7 | 1.9 | 2.3 | 0.5 | **2.0** |
-| 对照：原地不动 | 14.2 | 29.3 | 31.2 | 13.1 | 3.2 | 7.3 | 16.4 |
+| SmolVLA | 1.4 | 3.0 | 2.7 | 1.9 | 2.3 | 0.5 | **2.0** |
+| baseline: hold still | 14.2 | 29.3 | 31.2 | 13.1 | 3.2 | 7.3 | 16.4 |
 
-  这些帧都在训练集里，只能证明模型加载正确、训练有效，不能说明泛化能力（同样的检查 π₀.₅ 是 1.7，见 [07_pi05.md](07_pi05.md) 第 7 节）。
-- **推理速度**：笔记本 GPU 上一个动作块约 0.38 秒（第一次 1.2 秒，含预热），显存 0.9 GB。
-  一块能执行 1.67 秒，所以可以直接在笔记本上跑真机，不用远程推理。
+  PS: these frames are in the training set, so this only shows the model loads correctly and training worked, not that it generalises (the same check gives 1.7 for π₀.₅, see [07_pi05.md](07_pi05.md)).
+- **Inference speed**: about 0.38 s per chunk on the laptop GPU (1.2 s the first time, with warm-up), 0.9 GB of VRAM. A chunk lasts 1.67 s, so it runs on the robot straight from the laptop.
 
-## 8. 在真机上运行
+## 8. Running on the robot
 
 ```powershell
 .\scripts\robot.ps1 rollout -Policy outputs/train/smolvla_so101_pick_place/pretrained_model -Duration 30
 ```
 
-`robot.ps1` 会自动把 `config/robot.json` 里的任务描述作为语言指令传给模型。
+`robot.ps1` passes the task description from `config/robot.json` to the model as the language instruction.
 
-## 9. 和前两个策略对比时要看什么
+## 9. What to look at when comparing with the first two
 
-- **成功率**：同样按 [08_evaluation.md](08_evaluation.md) 跑 20 次。
-- **预训练的作用**：同样 50 条示范，从预训练权重微调的 SmolVLA 和从零训练的 ACT / Diffusion 相比如何。
-- **推理速度**：flow matching 10 步积分，比 Diffusion 的 100 步去噪快，但模型本身比 ACT 大很多。
+- **Success rate**: 40 trials following [08_evaluation.md](08_evaluation.md).
+- **What pretraining buys**: with the same 50 demos, how does fine-tuned SmolVLA compare with ACT / Diffusion trained from scratch?
+- **Inference speed**: 10 flow-matching steps with the prefix computed once is faster than Diffusion's denoising, but the model itself is much bigger than ACT.

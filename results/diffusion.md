@@ -1,31 +1,32 @@
-# Diffusion Policy 真机评估（前 10 次，2026-11-24；其余待测）
+# Diffusion Policy real-robot evaluation (first 10 trials, 2026-11-24; the rest to follow)
 
-- 模型：`outputs/train/diffusion_so101_pick_place/pretrained_model_ema`（278M，100k 步，EMA 权重，[Hub](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place)）
-- 采样：DDIM 10 步（`--policy.noise_scheduler_type=DDIM --policy.num_inference_steps=10`），每次推理约 200 ms
-- 协议：[docs/08_evaluation.md](../docs/08_evaluation.md)：晚上只开台灯、拉窗帘（和录示范时一样）；计划 5 个点 × 8 轮，每次最长 30 秒；
-  和 ACT **按组轮流**（ACT 5 次 → Diffusion 5 次 → …），"第 k 组"是 Diffusion 自己的第 k 组
-- 录像：本地数据集 `Yufeng1216/rollout_eval_diffusion`（`data/` 下，10 条）
-- 结果：✅ 成功 / 🟡 部分成功（抓起没放进） / ❌ 失败（没抓起）
-- "时长"= 录到的帧数 / 30。控制循环实际约 25 Hz（每段动作生成时会停一下），真实用时约为表中数字 × 1.17
+**English** · [简体中文](diffusion.zh-CN.md)
 
-| # | 点位 | 结果 | 时长 (s) | 备注 |
+- Model: `outputs/train/diffusion_so101_pick_place/pretrained_model_ema` (278M, 100k steps, EMA weights, [Hub](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place))
+- Sampling: 10-step DDIM (`--policy.noise_scheduler_type=DDIM --policy.num_inference_steps=10`), about 200 ms per inference
+- Protocol: [docs/08_evaluation.md](../docs/08_evaluation.md): night, desk lamp only, curtains closed (as when the demos were recorded); 5 spots × 8 rounds, at most 30 s per trial. Trials 1–10 alternated with ACT every 5 trials; trials 11–40 run in one go
+- Recording: local dataset `Yufeng1216/rollout_eval_diffusion` (under `data/`, 10 episodes)
+- Result: ✅ success / 🟡 partial (grasped, not placed) / ❌ failure (not grasped)
+- "Time" = recorded frames / 30. The control loop actually runs at about 25 Hz (it pauses briefly while each action segment is generated), so real time ≈ the number × 1.17
+
+| # | Spot | Result | Time (s) | Note |
 |---|---|---|---|---|
-| 1 | ① | ✅ | 10.1 | 第 1 组 |
-| 2 | ② | ✅ | 11.1 | 第 1 组 |
-| 3 | ③ | ✅ | 12.7 | 第 1 组 |
-| 4 | ④ | ✅ | 26.2 | 第 1 组 |
-| 5 | ⑤ | ✅ | 14.3 | 第 1 组 |
-| 6 | ① | ✅ | 12.3 | 第 2 组 |
-| 7 | ② | ✅ | 26.1 | 第 2 组 |
-| 8 | ③ | ✅ | 13.7 | 第 2 组 |
-| 9 | ④ | ✅ | 19.5 | 第 2 组 |
-| 10 | ⑤ | ❌ | 26.1 | 第 2 组 |
+| 1 | ① | ✅ | 10.1 | block 1 |
+| 2 | ② | ✅ | 11.1 | block 1 |
+| 3 | ③ | ✅ | 12.7 | block 1 |
+| 4 | ④ | ✅ | 26.2 | block 1 |
+| 5 | ⑤ | ✅ | 14.3 | block 1 |
+| 6 | ① | ✅ | 12.3 | block 2 |
+| 7 | ② | ✅ | 26.1 | block 2 |
+| 8 | ③ | ✅ | 13.7 | block 2 |
+| 9 | ④ | ✅ | 19.5 | block 2 |
+| 10 | ⑤ | ❌ | 26.1 | block 2 |
 
-## 汇总（有效的 10 次）
+## Summary (first 10 trials)
 
-| 指标 | 值 |
+| Metric | Value |
 |---|---|
-| **成功率** | **9/10 = 90%**（95% 区间 60–98%） |
-| 部分成功 | 0/10 |
-| 失败（没抓起） | 1/10 |
-| 各点位成功 | ① 2/2 · ② 2/2 · ③ 2/2 · ④ 2/2 · ⑤ 1/2 |
+| **Success rate** | **9/10 = 90%** (95% CI 60–98%) |
+| Partial | 0/10 |
+| Failure (not grasped) | 1/10 |
+| Success per spot | ① 2/2 · ② 2/2 · ③ 2/2 · ④ 2/2 · ⑤ 1/2 |
