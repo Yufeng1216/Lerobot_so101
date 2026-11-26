@@ -29,8 +29,8 @@ and comparing them against a **zero-shot baseline** that uses no demonstrations 
 
 Every policy is evaluated on the real robot with the same protocol
 ([docs/08_evaluation.md](docs/08_evaluation.md)): **40 trials** (5 start spots × 8), 30 s each, under the same
-lighting the demonstrations were recorded in (night, desk lamp only). Policies take turns in blocks of 5 trials, so
-slow drifts (lighting, toy wear, motor temperature) hit every policy equally.
+lighting the demonstrations were recorded in (night, desk lamp only). Each policy runs its 40 trials in one go
+(8 blocks of 5); between policies the arm cools down for 20 minutes.
 Success = toy released inside the box. Per-trial sheets are in [`results/`](results/).
 
 > **Status:** evaluation in progress (first 10 of 40 trials per policy so far).
