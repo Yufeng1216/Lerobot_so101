@@ -1,6 +1,8 @@
 <div align="center">
 
-# SO-101 模仿学习：ACT → Diffusion Policy → SmolVLA → π₀.₅
+<img src="assets/hero.webp" alt="SO-101 机器人学习：在低成本机械臂上比较 ACT、Diffusion Policy、SmolVLA 和 π₀.₅" width="100%" />
+
+<br />
 
 [English](README.md) · **简体中文**
 

@@ -1,6 +1,8 @@
 <div align="center">
 
-# SO-101 Imitation Learning: ACT → Diffusion Policy → SmolVLA → π₀.₅
+<img src="assets/hero.webp" alt="SO-101 Robot Learning: ACT, Diffusion Policy, SmolVLA and π₀.₅ on a low-cost arm" width="100%" />
+
+<br />
 
 **English** · [简体中文](README.zh-CN.md)
 
