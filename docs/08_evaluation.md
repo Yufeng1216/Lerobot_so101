@@ -21,8 +21,8 @@
 - 每次试验开始前：从臂在起始姿态，玩具放在标记点上，盒子是空的
 - 每测完一组，看一眼底座有没有移位
 - 每次最长 **30 秒**
-- 顺序：①②③④⑤ 为一组，**几个策略按组轮流**（A 测一组 → B 测一组 → A …），
-  这样光线、玩具磨损这类随时间的变化对每个策略的影响一样
+- 顺序：①②③④⑤ 为一组（`-Episodes 5`），**一个策略 8 组连续测完，再换下一个**
+- 换策略之间关掉扭矩、**冷却 20 分钟**，让舵机温度回到和开始时一样；冷却后重新检查灯光、相机和底座
 
 运行（每次试验都录成一条 episode，留作展示视频）：
 
@@ -30,12 +30,12 @@
 .\scripts\robot.ps1 eval -Policy <checkpoint 目录或 Hub 模型> -Name <策略名>
 ```
 
-例如 ACT 和 Diffusion 轮流，每次一组 5 次：
+例如测 ACT，每次一组 5 次，运行 8 次；ACT 测完、冷却后再测 Diffusion：
 
 ```powershell
 .\scripts\robot.ps1 eval -Policy outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model -Name act -Episodes 5
 .\scripts\robot.ps1 eval -Policy outputs/train/diffusion_so101_pick_place/pretrained_model_ema -Name diffusion -Episodes 5 --policy.noise_scheduler_type=DDIM --policy.num_inference_steps=10
-# 再运行第一条：同名的评估数据集已存在时会自动接着录，不会覆盖
+# 同名的评估数据集已存在时会自动接着录，不会覆盖
 ```
 
 - 背后是 `lerobot-rollout --strategy.type=episodic`：策略控制从臂做一次试验，然后进入复位阶段，

@@ -347,7 +347,7 @@ switch ($Command) {
 - `-Episodes` 没写时默认 20 而不是 record 的 50：`$PSBoundParameters.ContainsKey("Episodes")` 判断用户有没有显式传这个参数。
 - `--dataset.push_to_hub=false`：评估录像只留在本地。
 - **自动接着录**：同名评估数据集已存在（有 `meta\info.json`）时，自动加 `--resume=true --dataset.root=...`。
-  这样几个策略可以按组轮流（每次 `-Episodes 5`），不用记 `-Resume`。和 `record` 不同：录示范时重名多半是失误，要明确加 `-Resume`；
+  这样一个策略可以分几次测完（每次 `-Episodes 5`），不用记 `-Resume`。和 `record` 不同：录示范时重名多半是失误，要明确加 `-Resume`；
   评估时同名就是"同一组实验"。
 
 ### 执行前的两道检查（只针对 record）
