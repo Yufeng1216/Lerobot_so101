@@ -7,8 +7,9 @@ One attempt:
      H_pixel_to_table for the toy, H_pixel_to_place for the box)
   4. IK for: above the toy, at the toy, above the box                 (zero_shot/kinematics.py)
   5. scripted motion, open loop:
-       rest -> open gripper above toy -> straight down -> close -> straight up to box height
-            -> across to above the box (staying high, so the toy clears the box wall) -> open -> rest
+       rest -> open gripper above toy -> straight down -> close -> straight up to PLACE_Z (11 cm)
+            -> lift to ~CARRY_Z (17 cm) -> across to above the box at that height (the hanging toy
+            clears the box wall) -> down to PLACE_Z -> open -> rest
 
 Safety (the arm is driven by a script, not by a person, so every limit is checked before moving):
   * targets must lie in the area the toy / box can be in (WORKSPACE), else the attempt is skipped
@@ -49,14 +50,16 @@ GRIP_CLOSED = 0.0                                        # demos command ~1 when
 GRASP_Z = -0.008                                         # tip height at the grasp moment in the demos (m, --grasp-z)
 CLOSE_EARLY = 0.0                                        # start closing this far above GRASP_Z, while still descending (m, --close-early)
 HOVER_DZ = 0.06                                          # approach from 6 cm above the toy
-PLACE_Z = 0.11                                           # demos release ~9.5 cm above the table
+PLACE_Z = 0.11                                           # demos release ~10 cm above the table
+CARRY_Z = 0.17                                           # carry height: demos peak at 13.7 cm (90%: 16.6) while carrying
 WRIST_ROLL = -90.0                                       # same as at rest and in the demos
 
 # Where targets may be (m, base frame): demo grasp spots / release point +- a margin.
 WORKSPACE = {"toy": ((0.15, 0.34), (-0.14, 0.05)), "box": ((0.15, 0.38), (0.05, 0.28))}
 MIN_Z = -0.025        # lowest tip height allowed anywhere on a path (rest pose itself is -1.1 cm)
-CARRY_MIN_Z = 0.09    # while moving across to the box (the toy hangs a few cm under the tip)
-IK_TOL = {"grasp": 0.005, "hover": 0.012, "place": 0.015}
+CARRY_MIN_Z = 0.14    # while moving across to the box (the toy hangs several cm under the tip)
+IK_TOL = {"grasp": 0.005, "hover": 0.012, "place": 0.015, "carry": 0.035}  # carry poses are in free air;
+# above ~13 cm the 5-joint arm cannot keep the gripper vertical, so they may be a few cm off (paths are still checked)
 TOY_PROMPT, BOX_PROMPT = "the blue plush toy", "the center of the cardboard box"
 
 
@@ -106,6 +109,9 @@ def plan(toy_xy, box_xy) -> list[tuple[str, np.ndarray]]:
     q_place, e = solve_grasp([*box_xy, PLACE_Z], WRIST_ROLL)
     if e > IK_TOL["place"]:
         raise ValueError(f"no IK above the box (error {e * 100:.1f} cm)")
+    q_carry, e = ik([*box_xy, CARRY_Z], q_place)
+    if e > IK_TOL["carry"]:
+        raise ValueError(f"no IK high above the box (error {e * 100:.1f} cm)")
 
     g = lambda q, grip: np.r_[q[:5], grip]  # noqa: E731
     poses = [("above toy, open", g(q_hover, GRIP_OPEN))]
@@ -117,7 +123,11 @@ def plan(toy_xy, box_xy) -> list[tuple[str, np.ndarray]]:
     poses += [("down", g(q, grip_at(q))) for q in vertical_path(toy_xy, GRASP_Z + HOVER_DZ, GRASP_Z, q_hover, n=12)]
     poses += [("close", g(poses[-1][1], GRIP_CLOSED))]
     poses += [("up", g(q, GRIP_CLOSED)) for q in vertical_path(toy_xy, GRASP_Z, PLACE_Z, poses[-1][1], n=12)]
-    poses += [("above box", g(q_place, GRIP_CLOSED)), ("release", g(q_place, GRIP_OPEN)), ("rest", REST.copy())]
+    q_lift, e = ik([*toy_xy, CARRY_Z], poses[-1][1][:5])
+    if e > IK_TOL["carry"]:
+        raise ValueError(f"no IK high above the toy (error {e * 100:.1f} cm)")
+    poses += [("lift", g(q_lift, GRIP_CLOSED)), ("above box", g(q_carry, GRIP_CLOSED)), ("lower", g(q_place, GRIP_CLOSED)),
+              ("release", g(q_place, GRIP_OPEN)), ("rest", REST.copy())]
     return poses
 
 

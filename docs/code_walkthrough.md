@@ -986,7 +986,7 @@ The result is a list of named key poses (5 joints + gripper). If any step fails 
 so no joint exceeds `--speed` (°/s) and commands never jump.
 
 **Path check before moving (`check_paths`)**: run FK on every interpolated command and refuse if the tip goes below `MIN_Z`;
-the "over to the box" segment must stay above `CARRY_MIN_Z` (9 cm) so the dangling toy doesn't hit the box wall.
+the "over to the box" segment must stay above `CARRY_MIN_Z` (14 cm) so the dangling toy doesn't hit the box wall. Before that segment the arm lifts to `CARRY_Z` (17 cm, above 90% of the demos' carry heights); the "lift" and "above box" poses use the looser `IK_TOL["carry"]`, because above ~13 cm the 5-joint arm can't keep the gripper vertical.
 
 **Connecting the arm (`Arm`)**: LeRobot's `SO101Follower` directly, so the same calibration files and low-level interface as the learned policies.
 `move` sends `send_action` every 1/30 s; `close` first returns slowly to the start pose, then disconnects. LeRobot turns torque off on disconnect by default,

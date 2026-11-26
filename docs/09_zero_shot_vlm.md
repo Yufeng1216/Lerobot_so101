@@ -24,8 +24,8 @@ overhead camera frame (640×480)
    ▼  ③ inverse kinematics (IK): SO-101 URDF + damped least squares
    │     "gripper tip at (x, y, z), pointing down" → 5 joint angles
    ▼  ④ fixed motion script (open loop)
-         open → 6 cm above the toy → straight down → close → straight up to 11 cm →
-         over to the box → release → back to the start pose
+         open → 6 cm above the toy → straight down → close → straight up to 11 cm → lift to ~17 cm →
+         over to the box at that height → down to 11 cm → release → back to the start pose
 ```
 
 Let's go through what each block does.
@@ -129,16 +129,20 @@ Result: **0.1 mm** error on table targets, gripper pointing straight down.
 
 ```
 start pose → 6 cm above the toy (open) → straight down (IK every 0.5 cm, so the descent is a straight line) → close
-           → straight up to 11 cm → over to the box → release → back to the start pose
+           → straight up to 11 cm → lift to ~17 cm → over to the box at that height → down to 11 cm → release → back to the start pose
 ```
+
+Why carry at 17 cm: the toy hangs several cm under the gripper. In the demos the human lifted the tip to 13.7 cm on average while carrying
+(90% below 16.6 cm), so 17 cm clears the box wall in every demo. Above about 13 cm the 5-joint arm can no longer keep the gripper exactly vertical,
+so the carry poses are solved with a looser tolerance (a few cm); they are in free air, and the path check below still guards them.
 
 - Between key poses it interpolates linearly in joint space and sends targets at 30 Hz to `SO101Follower.send_action()`, at most 20°/s per joint by default.
   That is **exactly the same low-level interface and calibration files** as the learned policies use, so the comparison is fair.
-- **Checked before moving**: targets within a sensible area, small IK error, and along every interpolated point of the path the tip stays above 2.5 cm below the table surface (and above 9 cm while carrying, so the toy doesn't hit the box wall).
+- **Checked before moving**: targets within a sensible area, small IK error, and along every interpolated point of the path the tip stays above 2.5 cm below the table surface (and above 14 cm while carrying, so the toy doesn't hit the box wall).
   If anything fails, nothing moves.
 - `--step` pauses before each segment until you press Enter; Ctrl+C first returns slowly to the start pose, then disconnects.
 
-Offline: a safe path can be planned from **every one** of the 50 demo start frames; one full attempt takes about 23 s.
+Offline: with the toy at each demo's grasp point and the box at its release point, a safe path is planned in **35 of 35** cases; while carrying, the tip never drops below 16.6 cm; one full attempt takes about 25 s.
 
 ## 6. Offline validation
 
