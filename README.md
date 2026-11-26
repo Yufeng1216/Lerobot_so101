@@ -33,12 +33,12 @@ lighting the demonstrations were recorded in (night, desk lamp only). Each polic
 (8 blocks of 5); between policies the arm cools down for 20 minutes.
 Success = toy released inside the box. Per-trial sheets are in [`results/`](results/).
 
-> **Status:** evaluation in progress (first 10 of 40 trials per policy so far).
+> **Status:** ACT and Diffusion Policy done (40 trials each; Diffusion vs ACT: Fisher's exact p = 0.025). SmolVLA, π₀.₅ and the zero-shot baseline are next.
 
 | Policy | Steps × batch | Samples seen (epochs) | Train time | Success | 95% CI | Grasped, not placed | Not grasped | Inference / chunk | Model | Clip |
 |---|---|---|---|---|---|---|---|---|---|---|
-| ACT | 50k × 8 | 400k (≈27) | 4.0 h, RTX 3070 Laptop | **4/10** ([sheet](results/act.md)) | 17–69% | 0 | 6 | ~47 ms | [🤗](https://huggingface.co/Yufeng1216/act_so101_pick_place) | [gif](assets/act_success.gif) |
-| Diffusion Policy | 100k × 8 | 800k (≈53) | ≈4 h, Tesla V100 16 GB | **9/10** ([sheet](results/diffusion.md)) | 60–98% | 0 | 1 | ~200 ms (DDIM, 10 steps) | [🤗](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) | [gif](assets/diffusion_success.gif) |
+| ACT | 50k × 8 | 400k (≈27) | 4.0 h, RTX 3070 Laptop | **14/40** ([sheet](results/act.md)) | 22–51% | 4 | 22 | ~47 ms | [🤗](https://huggingface.co/Yufeng1216/act_so101_pick_place) | [gif](assets/act_success.gif) |
+| Diffusion Policy | 100k × 8 | 800k (≈53) | ≈4 h, Tesla V100 16 GB | **25/40** ([sheet](results/diffusion.md)) | 47–76% | 7 | 8 | ~200 ms (DDIM, 10 steps) | [🤗](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) | [gif](assets/diffusion_success.gif) |
 | SmolVLA | 20k × 32 | 640k (≈43) | ≈14 h, Tesla V100 16 GB | – | – | – | – | ~0.38 s (RTX 3070 Laptop) | – | – |
 | π₀.₅ | 3k × 32 | 96k (≈6) | 7.1 h, A100 80 GB (≈ $18) | – | – | – | – | – | – | – |
 | Zero-shot VLM + IK | 0 (no demos) | 0 | – | – | – | – | – | – | – | – |
