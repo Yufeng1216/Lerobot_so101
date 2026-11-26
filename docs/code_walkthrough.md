@@ -348,6 +348,7 @@ Details of `eval`:
 - The dataset is called `rollout_eval_<Name>`: LeRobot requires rollout datasets to start with `rollout_` and errors otherwise.
 - Without `-Episodes` the default is 20, not record's 50: `$PSBoundParameters.ContainsKey("Episodes")` tells whether the user passed it explicitly.
 - `--dataset.push_to_hub=false`: evaluation videos stay local.
+- **Camera renaming for VLAs**: SmolVLA and π₀.₅ were fine-tuned with `--rename_map` (top → camera1, ...), and the mapping is stored in the model's `policy_preprocessor.json`. But `lerobot-rollout` checks camera names *before* the preprocessor runs and only skips that check when `--rename_map` is given. So `eval` reads the `rename_observations_processor` step from that file and passes the same mapping on; for ACT and Diffusion there is none and nothing is added. The inner quotes are written as `\"` for the PowerShell 5.1 reason explained in §7.
 - **Automatic append**: if an evaluation dataset of that name exists (has `meta\info.json`), `--resume=true --dataset.root=...` are added.
   So one policy can be tested in several runs (`-Episodes 5` each) without remembering `-Resume`. Unlike `record`: there a name clash is usually a mistake and needs an explicit `-Resume`;
   for evaluation the same name means "the same experiment".

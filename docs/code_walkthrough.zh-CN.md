@@ -348,6 +348,7 @@ switch ($Command) {
 - 数据集名是 `rollout_eval_<Name>`：LeRobot 规定 rollout 录的数据集名字必须以 `rollout_` 开头，否则直接报错。
 - `-Episodes` 没写时默认 20 而不是 record 的 50：`$PSBoundParameters.ContainsKey("Episodes")` 判断用户有没有显式传这个参数。
 - `--dataset.push_to_hub=false`：评估录像只留在本地。
+- **VLA 的相机改名**：SmolVLA、π₀.₅ 微调时用了 `--rename_map`（top → camera1……），这个对应关系存在模型的 `policy_preprocessor.json` 里。但 `lerobot-rollout` 在预处理器运行**之前**就会检查相机名，只有命令里带了 `--rename_map` 才跳过检查。所以 `eval` 会从这个文件里读出 `rename_observations_processor` 这一步，把同样的对应关系传下去；ACT、Diffusion 没有这一步，就什么都不加。里面的引号写成 `\"`，原因见第 7 节（PowerShell 5.1 会吃掉普通引号）。
 - **自动接着录**：同名评估数据集已存在（有 `meta\info.json`）时，自动加 `--resume=true --dataset.root=...`。
   这样一个策略可以分几次测完（每次 `-Episodes 5`），不用记 `-Resume`。和 `record` 不同：录示范时重名多半是失误，要明确加 `-Resume`；
   评估时同名就是"同一组实验"。

@@ -29,13 +29,13 @@
 光照和录示范时一样（晚上，只开台灯）。每个策略 40 次连续测完（8 组 × 5 次），换策略之间机械臂冷却 20 分钟。
 成功 = 玩具放进盒子并松开。逐次记录在 [`results/`](results/)。
 
-> **状态：** ACT 和 Diffusion Policy 已测完（各 40 次；两者比较 Fisher 精确检验 p = 0.025）。接下来是 SmolVLA、π₀.₅ 和零样本基线。
+> **状态：** ACT、Diffusion Policy、SmolVLA 已测完（各 40 次）。接下来是 π₀.₅ 和零样本基线。
 
 | 策略 | 步数 × batch | 看过的样本（epoch） | 训练时长 | 成功 | 95% 区间 | 抓起没放进 | 没抓起 | 每个动作块推理 | 模型 | 片段 |
 |---|---|---|---|---|---|---|---|---|---|---|
 | ACT | 50k × 8 | 400k (≈27) | 4.0 h，RTX 3070 Laptop | **14/40**（[记录](results/act.zh-CN.md)） | 22–51% | 4 | 22 | ~47 ms | [🤗](https://huggingface.co/Yufeng1216/act_so101_pick_place) | [gif](assets/act_success.gif) |
 | Diffusion Policy | 100k × 8 | 800k (≈53) | ≈4 h，Tesla V100 16 GB | **25/40**（[记录](results/diffusion.zh-CN.md)） | 47–76% | 7 | 8 | ~200 ms（DDIM 10 步） | [🤗](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) | [gif](assets/diffusion_success.gif) |
-| SmolVLA | 20k × 32 | 640k (≈43) | ≈14 h，Tesla V100 16 GB | – | – | – | – | ~0.38 s（RTX 3070 Laptop） | – | – |
+| SmolVLA | 20k × 32 | 640k (≈43) | ≈14 h，Tesla V100 16 GB | **26/40**（[记录](results/smolvla.zh-CN.md)） | 50–78% | 0 | 14 | ~0.38 s（RTX 3070 Laptop） | – | – |
 | π₀.₅ | 3k × 32 | 96k (≈6) | 7.1 h，A100 80 GB（≈ $18） | – | – | – | – | – | – | – |
 | 零样本 VLM + IK | 0（不用示范） | 0 | – | – | – | – | – | – | – | – |
 

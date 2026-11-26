@@ -139,8 +139,21 @@ switch ($Command) {
             "--dataset.push_to_hub=false",
             "--display_data=true"
         )
-        # If this eval dataset already exists, append to it. That lets several policies take turns in
-        # blocks (e.g. -Episodes 5 per policy, alternating) so lighting drift hits all of them equally.
+        # Policies fine-tuned with renamed cameras (SmolVLA, pi0.5) store the mapping in their
+        # preprocessor. lerobot-rollout checks camera names before that runs, and only skips the
+        # check when --rename_map is given, so pass the stored mapping along. Inner quotes are
+        # written as \" because Windows PowerShell 5.1 drops plain quotes when calling python.
+        $pre = Join-Path $Policy "policy_preprocessor.json"
+        if (Test-Path $pre) {
+            $step = (Get-Content $pre -Raw | ConvertFrom-Json).steps |
+                Where-Object { $_.registry_name -eq "rename_observations_processor" } | Select-Object -First 1
+            if ($step -and $step.config.rename_map.PSObject.Properties.Count -gt 0) {
+                $pairs = $step.config.rename_map.PSObject.Properties | ForEach-Object { "\`"$($_.Name)\`":\`"$($_.Value)\`"" }
+                $argsList += "--rename_map={$($pairs -join ',')}"
+            }
+        }
+        # If this eval dataset already exists, append to it, so one policy's 40 trials can be run as
+        # several blocks (-Episodes 5 each) with the same command.
         $lerobotHome = if ($env:HF_LEROBOT_HOME) { $env:HF_LEROBOT_HOME } else { Join-Path $env:HF_HOME "lerobot" }
         $evalDir = Join-Path $lerobotHome $repoId
         if (Test-Path (Join-Path $evalDir "meta\info.json")) {
