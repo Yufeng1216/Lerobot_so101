@@ -1,10 +1,10 @@
-# Diffusion Policy 真机评估（有效 10 次，2026-11-24；其余待重测）
+# Diffusion Policy 真机评估（前 10 次，2026-11-24；其余待测）
 
 - 模型：`outputs/train/diffusion_so101_pick_place/pretrained_model_ema`（278M，100k 步，EMA 权重，[Hub](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place)）
 - 采样：DDIM 10 步（`--policy.noise_scheduler_type=DDIM --policy.num_inference_steps=10`），每次推理约 200 ms
 - 协议：[docs/08_evaluation.md](../docs/08_evaluation.md)：晚上只开台灯、拉窗帘（和录示范时一样）；计划 5 个点 × 8 轮，每次最长 30 秒；
   和 ACT **按组轮流**（ACT 5 次 → Diffusion 5 次 → …），"第 k 组"是 Diffusion 自己的第 k 组
-- 录像：本地数据集 `Yufeng1216/rollout_eval_diffusion`（`data/` 下，10 条；底座偏移后的 30 条已从数据集删除）
+- 录像：本地数据集 `Yufeng1216/rollout_eval_diffusion`（`data/` 下，10 条）
 - 结果：✅ 成功 / 🟡 部分成功（抓起没放进） / ❌ 失败（没抓起）
 - "时长"= 录到的帧数 / 30。控制循环实际约 25 Hz（每段动作生成时会停一下），真实用时约为表中数字 × 1.17
 
@@ -29,12 +29,3 @@
 | 部分成功 | 0/10 |
 | 失败（没抓起） | 1/10 |
 | 各点位成功 | ① 2/2 · ② 2/2 · ③ 2/2 · ④ 2/2 · ⑤ 1/2 |
-
-## 作废的第 11–40 次：底座被碰动了
-
-回查评估录像发现：从臂在起始姿态时的图像位置，前 10 次和示范一致（偏差 < 1 像素，示范之间的波动约 2 像素）；
-从总第 20 次试验左右起（ACT 和 Diffusion 是交替测的），偏移 6–13 像素，直到结束都没复位，
-说明**机械臂底座被碰动了**。底座一动，相对相机和桌面的整个坐标系都变了，这 30 次不能算作和示范相同的条件。
-当时记下的结果（每组 5 次，①–⑤）：`11113 11113 11331 12113 31333 31113`，不计入成功率。
-
-待做：把底座固定在桌上，重测第 11–40 次，再和这 10 次合起来。

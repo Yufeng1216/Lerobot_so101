@@ -33,11 +33,9 @@ lighting the demonstrations were recorded in (night, desk lamp only). Policies t
 slow drifts (lighting, toy wear, motor temperature) hit every policy equally.
 Success = toy released inside the box. Per-trial sheets are in [`results/`](results/).
 
-> **Status:** only the first 10 trials per policy are valid so far. Around trial 20 of the session the arm's base
-> was knocked out of place (found afterwards from the recorded camera frames, see below); the remaining 30 trials
-> per policy are being re-run with the base clamped to the table. Numbers below are provisional.
+> **Status:** evaluation in progress (first 10 of 40 trials per policy so far).
 
-| Policy | Steps × batch | Samples seen (epochs) | Train time | Success (valid trials) | 95% CI | Grasped, not placed | Not grasped | Inference / chunk | Model | Clip |
+| Policy | Steps × batch | Samples seen (epochs) | Train time | Success | 95% CI | Grasped, not placed | Not grasped | Inference / chunk | Model | Clip |
 |---|---|---|---|---|---|---|---|---|---|---|
 | ACT | 50k × 8 | 400k (≈27) | 4.0 h, RTX 3070 Laptop | **4/10** ([sheet](results/act.md)) | 17–69% | 0 | 6 | ~47 ms | [🤗](https://huggingface.co/Yufeng1216/act_so101_pick_place) | [gif](assets/act_success.gif) |
 | Diffusion Policy | 100k × 8 | 800k (≈53) | ≈4 h, Tesla V100 16 GB | **9/10** ([sheet](results/diffusion.md)) | 60–98% | 0 | 1 | ~200 ms (DDIM, 10 steps) | [🤗](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) | [gif](assets/diffusion_success.gif) |
@@ -46,34 +44,6 @@ Success = toy released inside the box. Per-trial sheets are in [`results/`](resu
 | Zero-shot VLM + IK | 0 (no demos) | 0 | – | – | – | – | – | – | – | – |
 
 <sub>Epochs over the 15k-frame training split (90% of 16,717 frames). 95% CI: Wilson score interval.</sub>
-
-![Per-spot success rate](assets/results.svg)
-
-### How to read this comparison
-
-- **Each policy uses its own standard recipe** (from the paper / LeRobot defaults), on the same 50
-  demonstrations and the same evaluation protocol. This answers *"which method works better when deployed
-  as intended on this task?"*, not *"which architecture is better at equal compute"*.
-- **Training steps are not comparable across rows.** Batch sizes differ (8 vs 32), model sizes differ by ~70×
-  (52 M to 4.1 B), and SmolVLA / π₀.₅ start from pretrained weights while ACT and Diffusion start from scratch.
-  *Samples seen* and *train time* are listed so the budgets can be compared directly.
-- **Why 40 trials.** With 20 trials, 50% vs 75% would still have overlapping 95% intervals (30–70% vs 53–89%,
-  Fisher's exact test p ≈ 0.19). With the 10 valid trials so far, 4/10 vs 9/10 gives p ≈ 0.06: a trend only.
-
-**Observations so far**
-
-- **Diffusion Policy is ahead of ACT** (9/10 vs 4/10 in the valid trials). Every failure so far is a missed grasp;
-  once the toy is in the gripper, both policies reach the box.
-- **ACT fails at spots ①–③ and succeeds at ④–⑤** in every valid trial (0/6 vs 4/4); Diffusion misses only one
-  trial, at ⑤. With 2 trials per spot this is a lead, not a result.
-- **The setup itself has to be checked during the evaluation, not only before it.** The base of the arm moved by
-  ~0.5–1 cm partway through the session and nobody noticed at the time. It showed up afterwards: with the camera
-  fixed, the arm's image position at its rest pose stays within ~2 px across all 50 demos, but jumped by 6–13 px
-  from one block onward. All later trials were discarded. The same shift also made the zero-shot baseline
-  grasp beside the toy, since its targets are computed in the base frame.
-- **Sampler matters for Diffusion.** The default 100-step DDPM takes ~1.5 s per action chunk on the laptop GPU,
-  longer than the 1.07 s the chunk lasts, so the arm would stall; 10-step DDIM is ~10× faster with the same
-  offline action error ([docs/05](docs/05_diffusion_policy.md#8-在真机上运行)).
 
 ## Hardware
 
