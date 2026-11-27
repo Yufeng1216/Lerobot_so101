@@ -23,7 +23,7 @@ Python / PowerShell 语法在第一次出现时解释（标为 📘）。
 | 6 评估 | [`make_server_config.py`、`serve_pi05.py`](#15-远程推理make_server_configpy-和-cloudhf_jobsserve_pi05py) | π₀.₅ 在 HF Jobs 的 GPU 上跑，笔记本控制机械臂 |
 | 6 评估 | [`make_gif.py`](#11-scriptsmake_gifpy) | 把一次评估试验剪成 README 用的 GIF |
 | 6 评估 | [`plot_results.py`](#12-scriptsplot_resultspy) | 从 `results/*.md` 画各点位成功率柱状图 |
-| 7 零样本 | [`zero_shot/*`](#14-zero_shot零样本基线) | 运动学、单应性标定、VLM 指向（不用示范训练的基线） |
+| 7 零样本 | [`zero_shot/*`](#14-zero_shot免训练基线vlm-智能体) | 运动学、触碰标定、夹爪测量、Claude Haiku 智能体 |
 | 内部 | [LeRobot 内部做了什么](#9-lerobot-内部我们调用的命令在做什么) | 录制循环、数据集、训练循环、ACT 前向 |
 
 ---
@@ -917,93 +917,119 @@ LeRobot 把 `--policy.path` 存成 `Path`，Windows 上写进 JSON 变成 `lerob
 
 ---
 
-## 14. `zero_shot/`：零样本基线
+## 14. `zero_shot/`：免训练基线（VLM 智能体）
 
-设计和结果见 [09_zero_shot_vlm.zh-CN.md](09_zero_shot_vlm.zh-CN.md)。这里讲代码。运行方式都是 `python -m zero_shot.<文件名>`
-（从仓库根目录运行，`-m` 让 Python 把 `zero_shot` 当成一个包，文件之间可以互相 import）。
+设计和结果见 [09_zero_shot_vlm.zh-CN.md](09_zero_shot_vlm.zh-CN.md)，这一节讲代码。模块在仓库根目录用 `python -m zero_shot.<文件名>` 运行
+（`-m` 让 Python 把 `zero_shot` 当作一个包，里面的文件才能互相 import）；两个标定脚本也可以直接当普通文件运行。
+
+| 文件 | 作用 |
+|---|---|
+| `kinematics.py` | 基于 SO-101 URDF 的 FK / IK |
+| `calibrate_touch.py` | 触碰标定：遥操作、碰胶带块、记录指尖位置 |
+| `fit_touch_calib.py` | 拟合镜头畸变 + 单应性 → `camera_calib.json` |
+| `measure_gripper.py` | 各开度下的指尖距离 → `gripper_geometry.json` |
+| `agent.py` | Claude Haiku 智能体：工具、运动和安全层、主循环 |
 
 ### `kinematics.py`：正 / 逆运动学
 
-**读 URDF：** URDF 是描述机器人的 XML。每个 `<joint>` 有父连杆、子连杆、`<origin xyz rpy>`（关节在父连杆坐标系里的位置和朝向）
-和 `<axis>`（转轴）。从夹爪尖往回找父连杆，一直找到底座，就得到 6 个关节组成的链。
+**读 URDF**：URDF 是描述机器人的 XML。每个 `<joint>` 有父连杆、子连杆、`<origin xyz rpy>`（关节在父坐标系里的位置和姿态）
+和 `<axis>`（旋转轴）。从夹爪指尖顺着父连杆一路走回底座，就得到 6 个关节的链。
 
-**正运动学（FK）：** 从底座开始，依次乘上每个关节的"固定偏移 × 绕转轴旋转 q"两个 4×4 矩阵，
-最后得到夹爪尖在底座坐标系里的位置和朝向：
+**正运动学（FK）**：从底座开始，对每个关节乘上两个 4×4 矩阵"固定偏移 × 绕轴转 q"，
+结果就是指尖在底座坐标系里的位置和姿态：
 
 ```python
 for j in CHAIN:
-    T = T @ j.origin                      # 固定偏移（来自 URDF 的 xyz / rpy）
+    T = T @ j.origin                      # 固定偏移（URDF 的 xyz / rpy）
     if j.movable:
-        R[:3, :3] = _axis_angle(j.axis, angles[j.name])   # 绕转轴旋转关节角（罗德里格斯公式）
+        R[:3, :3] = _axis_angle(j.axis, angles[j.name])   # 绕轴转关节角（Rodrigues 公式）
         T = T @ R
 ```
 
-**逆运动学（IK）：** 给定目标点，反过来求关节角。没有解析公式，就迭代：
+**逆运动学（IK）**：给定目标，求关节角。没有解析解，只能迭代：
 
 ```python
-r = residual(q)                 # [位置误差 (m) 3 维, 0.05 × (夹爪朝向 − 竖直向下) 3 维]
-J[:, k] = (residual(q + dq) - r) / 0.01         # 数值雅可比：每个关节动 0.01°，残差变多少
+r = residual(q)                 # [位置误差（米），3 维；0.05 ×（夹爪方向 − 正下方），3 维]
+J[:, k] = (residual(q + dq) - r) / 0.01         # 数值雅可比：每个关节动 0.01°，看 r 怎么变
 step = J.T @ solve(J @ J.T + λ² I, -r)          # 阻尼最小二乘（DLS）
 ```
 
-- 📘 **雅可比矩阵** J：残差对每个关节角的导数。牛顿法会直接用 J 的逆，但手臂伸直或到了限位附近 J 接近奇异，
-  步子会大得离谱。加 λ²I（阻尼）后步子始终有界，这就是 DLS（也叫 Levenberg–Marquardt）。
-- **λ 的大小和单位有关**：关节转 1°，夹爪尖只动约 3 mm，J 的元素约 3e-3。所以 λ 要取 1e-3 这个量级；λ 太大（比如 0.05）的话 λ² 比 JJᵀ 大几十倍，每步几乎不动。
-  取 1e-3 时几十次迭代就收敛到 0.1 mm。
-- **为什么只用 4 个关节**：wrist_roll 只让夹爪绕自己的轴转，不改变夹爪尖的位置和朝下的方向，固定不动。
-- **初值很重要**（`solve_grasp`）：从收拢姿态出发，shoulder_lift 正好在 −100° 限位上，第一步就被裁剪回限位，卡死。
-  所以用示范里典型的抓取姿态做初值（试 4 个，取误差最小的），shoulder_pan 直接用目标的方位角估计。
+- 📘 **雅可比** J：残差对每个关节角的导数。牛顿法会直接用 J 的逆，但机械臂伸直或者接近极限时 J 接近奇异，
+  步长会大得离谱。加上 λ²I（阻尼）让步长有界：这就是 DLS（也叫 Levenberg–Marquardt）。
+- **λ 跟单位有关**：关节动 1°，指尖只动约 3 mm，所以 J 的元素大约是 3e-3，λ 要在 1e-3 左右；λ 太大（比如 0.05）的话 λ² 远大于 JJᵀ，求解器几乎不动。
+- **为什么只用 4 个关节**：wrist_roll 只让夹爪绕自身转，既不改变指尖位置，也不改变朝下的方向，所以固定不动。
+- **`solve_seeded`，从哪里开始解**：从折叠姿态出发，shoulder_lift 正好在 −100° 的极限上；第一步就被裁回极限，卡住不动。
+  所以 IK 还会从一个均匀网格出发（shoulder_lift、elbow_flex ∈ {−60, −20, 20, 60}°，wrist_flex ∈ {30, 70}°，共 32 个初值，shoulder_pan 用 `arctan2` 对准目标），
+  再加上当前姿态。取误差最小的；和它相差 1 mm 以内的几个解里，取"离当前姿态最大关节变化最小"的那个（免得机械臂白白绕一大圈）。
+  这里没有任何东西来自示范。
 
-### `check_fk.py`：不用机器人验证 FK
+### `calibrate_touch.py`：触碰标定
 
-找每条示范"夹爪先张开、再合上"的那一帧（`grasp_frame`），算这时的夹爪尖位置。
-桌面抓取的高度应该处处相同，位置应该聚成 5 簇（5 个起始点）。聚类用手写的 k-means（`kmeans`）：
-先用"最远点"选 5 个初始中心，再反复"把点分给最近的中心 → 中心挪到各簇的平均位置"。
+- **脚本自己做遥操作**：直接连主臂（`SO101Leader`）和从臂，每 1/30 秒执行一次 `follower.send_action(leader.get_action())`。
+  两个串口必须由脚本自己占着，因为它还要在碰到的那一刻读从臂的关节角（用 `lerobot-teleoperate` 的话串口会被它占住）。
+- 📘 **读键盘又不卡住循环**：`input()` 会把遥操作卡住。所以开一个后台线程（`threading.Thread(daemon=True)`）从 `sys.stdin` 读行，
+  放进 `queue.Queue`；主循环每一轮用 `get_nowait()` 看一眼。`daemon=True` 让 Python 退出时不用等这个线程。
+- 按回车：等 0.3 秒让机械臂停稳，读关节角，FK → 指尖 xyz，存一张照片 `touch_<n>.jpg`。`u` 撤销上一个点，`q` 结束；
+  第一次回车存 `clean.jpg`（机械臂移开），用来找胶带块。
+- **退出**：断开连接会松开扭矩，所以说明里要求先用主臂把从臂收回休息姿态，**再**输入 `q`。
 
-### `calibrate_from_demos.py`：单应性矩阵
+### `fit_touch_calib.py`：畸变 + 单应性
 
-- `toy_pixel`：把图像转到 HSV 颜色空间，取色相 100–130（蓝色）、饱和度高的像素，开运算去掉噪点，取最大连通块的中心。
-- 📘 **单应性矩阵** H（3×3）：同一个平面在两个视角之间的映射，`[x, y, 1] ∝ H [u, v, 1]`。
-  俯视相机拍的桌面和机械臂坐标系里的桌面是同一个平面，所以一个 H 就能把像素换成桌面坐标，不需要深度。
-- `cv2.findHomography(..., cv2.RANSAC, 0.015)`：RANSAC 反复随机挑 4 组点求 H，保留"误差小于 1.5 cm 的点最多"的那个，
-  抓取检测错了或者颜色识别偏了的点会被当成外点丢掉。
-- **第二个映射 `H_pixel_to_place`（给盒子用）**：只用桌面抓取点拟合的 H，在那块 10×10 cm 区域里准（0.6 cm），
-  但到了盒子那边差 24 cm。单应性矩阵的第三行（透视项）只在数据覆盖的地方被约束住，离得越远误差放大得越厉害。
-  所以再从示范里找"松手"那一帧：`frame_at` 用 PyAV 解码数据集 MP4 里指定的帧（先 seek 到前 1 秒，再逐帧解码到目标时间），
-  取画面里玩具的位置和 FK 算的夹爪位置配对，和抓取点一起拟合。两片相距 15 cm 的点把映射"两头钉住"，盒子处误差 1.3 cm。
+- **找胶带块**（做一次，存成 `pairs.json`）：灰度图减去它的高斯模糊（σ = 15 像素）= 每个像素比周围暗多少；
+  大于 45 → 二值图；`cv2.connectedComponentsWithStats` 给出每一团的面积、大小和中心；保留 40–500 像素、接近方形的团。
+  每次触碰先用一个粗拟合映射过去，匹配最近的胶带块，再重新拟合（迭代几轮）。
+- `undistort`：$u_d = c + (u - c)(1 + k_1 r^2 + k_2 r^4)$ 的反函数没有解析解，用 30 轮不动点迭代。
+- `fit`：📘 `scipy.optimize.minimize(..., method="Nelder-Mead")` 不用梯度地搜 $(k_1, k_2)$（3 个点组成的单纯形，往代价低的方向翻转 / 收缩）；
+  代价函数里，`cv2.findHomography(..., 0)` 在去畸变后的点上用普通最小二乘拟合 $H$，返回以米为单位的均方误差。
+- **留一检验**：拿掉第 *t* 个点重新拟合，再预测 *t*；这些误差的中位数才是实打实的精度（这里是 8.3 mm）。每个点都打印出来，哪次碰偏了一眼就能看到。
+- 输出 `camera_calib.json`：$k$、$H$、桌面高度（各次触碰指尖高度的中位数）和两个误差。
 
-### `pointing.py` 和 `eval_pointing.py`：VLM 指向
+### `measure_gripper.py`
 
-- 提示词要求模型只回答 JSON：`[{"point_2d": [x, y], "label": "toy"}]`。`parse_point` 用正则抠出 `[...]` 再 `json.loads`，
-  也兼容模型改答 `bbox_2d`（取框的中心）。
-- Qwen3-VL 的坐标是 **0–1000 的相对值**，`x / 1000 * 宽度` 才是像素。
-- `do_sample=False`：贪心解码，同一张图每次答案相同，评估可复现。
-- `eval_pointing.py` 把 VLM 的点和颜色检测的玩具中心比较，再用 H 换算成桌面上的厘米误差。
+用智能体自己的规划器把机械臂抬到 (20, 0, 12) cm，开度依次设为 0 / 25 / 50 / 75 / 100，每次让你输入尺子量的读数 → `gripper_geometry.json`。
+放在 `finally` 里：结束时夹爪回到起始开度，机械臂回家，按了 Ctrl+C 也一样。
 
-### `run_grasp.py`：真机执行
+### `agent.py`：智能体
 
-**规划（`plan`）**：先求抓取姿态（`solve_grasp`），再以它为初值求上方悬停姿态；下降和抬起用 `vertical_path`
-沿竖直线取 8–12 个点、每个点做一次 IK，并用上一个点的解当初值（"热启动"），所以相邻姿态很接近、路径是直上直下。
-最后得到一串命名的关键姿态（5 个关节 + 夹爪）。任何一步不满足就抛 `ValueError`，这次试验记为 skipped，机械臂不动。
+**几何小函数**
+- `table_to_pixel`：标定的反方向（桌面 → 用 $H^{-1}$ 得到去畸变的像素 → 再 `distort`），用来画网格和指尖标记。
+- `jaw_dir`：从固定指尖指向活动指尖的方向 = 指尖坐标系的 $-x$ 轴（`-fk(q)[:3, 0]`），压平到桌面上。
+- `fingertips_m`：固定指尖（FK 算出）和活动指尖（固定指尖 + 方向 × 开度 `q[5]` 对应的距离，用 `np.interp` 在实测表上插值）。
+- `tip_cm`：两个指尖的中点，单位是桌面 cm；这就是模型看到、也是模型给出的"夹爪位置"。
 
-抓起后竖直只抬到悬停高度（约 5 cm，玩具已经离开桌面）；之后的"lift"（17 cm）和"above box"两个姿态用 `orient_weight=CARRY_TILT`（只轻轻拉向竖直）来求，因为靠近底座时 5 个关节的机械臂在那么高的地方没法保持竖直，而在空中也不需要竖直。
+**规划一次移动（`plan_line` → `plan_tip`）**：模型给的目标是中点，而 IK 的指尖是固定指，所以目标要逆着 `jaw_dir` 挪半个指距。
+`jaw_dir` 又取决于最终姿态，所以：先规划，取终点姿态，重新算挪多少，再规划一次。然后 `plan_tip` 按顺序尝试：
+1. `_line`：指尖走直线，每 1 cm 解一次 IK，每个点用前一个点的结果做初值；手指朝下（`orient_weight` 0.05），做不到竖直的地方允许倾斜（0.01）；
+2. `solve_seeded` + 一次关节空间的跳转（比如从折叠的家位置出发，直线解不出来）；
+3. 先垂直抬到 15 cm，再走直线。
+每个方案都要过 `_clear`：沿插值每 2° 算一次 FK，指尖不能低于桌面（如果起点本来就更低，就不能低于起点）。都不安全 → `ValueError`，变成工具返回的错误信息。
 
-**插值（`interpolate`）**：两个关键姿态之间在关节空间走直线，步数 = 最大关节角变化 ÷ 速度 × 30 Hz，
-所以每个关节都不超过 `--speed`（°/s），指令也不会跳变。
+**`Robot`**：从臂 + 两个用 OpenCV 打开的相机（拍照前先丢掉 4 帧，免得拿到缓冲区里的旧画面）。`play` 在关节空间插值，速度 ≤ 45°/s，
+然后**等关节到达目标 1.5° 以内**（最多 2 秒）：舵机会落后于指令，第一次真机试跑时，动作一结束就拍照，机械臂还差 2–4 cm。
+`--dry-run` 时什么都不连：图像是录好的一帧，"实测"关节角就是上一次的指令。花一美分左右就能检查 API 的流程和规划器。
+`home` 是启动时读到的姿态。
 
-**动之前的路径检查（`check_paths`）**：把每一个插值出来的指令都算一遍 FK，夹爪尖低于 `MIN_Z` 就拒绝；
-"平移到盒子上方"这一段要求不低于 `CARRY_MIN_Z`（14 cm），免得挂着的玩具撞到盒壁。在这之前先抬到 `CARRY_Z`（17 cm，比 90% 示范的搬运高度都高）；"lift"和"above box"两个姿态用放宽的 `IK_TOL["carry"]`，因为高于约 13 cm 时 5 个关节的机械臂没法让夹爪保持竖直。
+**工具（`TOOLS`、`run_tool`）**：用 JSON schema 定义工具，带 `strict: True`（API 保证参数符合 schema，比如数字一定是数字）。
+`move_to` / `gripper` 执行动作，然后返回 `observation`：带网格的俯视图（`draw_grid`）、腕部图，以及一行文字：夹爪位置、开度的指令值和实测值。
+如果一次移动停在离目标 2 cm 以外，文字会提示可能被挡住了。`--step` 在每个动作前要你按回车。
 
-**连机械臂（`Arm`）**：直接用 LeRobot 的 `SO101Follower`，和学习型策略走同一套标定文件和底层接口。
-`move` 每 1/30 秒发一次 `send_action`；`close` 先慢慢回到起始姿态再断开。断开时 LeRobot 默认会关掉扭矩，
-如果在半空断开机械臂会掉下来，所以 Ctrl+C（`KeyboardInterrupt`）也走这条路。
+**主循环（`attempt`）**：在 Messages API 上手写的工具循环：
 
-**诊断（`report`、`snapshot`）**：下降到底和闭合后读一次舵机实际角度，打印"指令 vs 实测"的夹爪尖高度并写进 CSV；
-同时存俯视 + 腕部照片。Example：如果实测高度对、夹爪却合到了 1（两指间是空的），说明是水平位置偏了。
+```python
+resp = client.messages.create(model="claude-haiku-5-5", system=SYSTEM, tools=TOOLS,
+                              output_config={"effort": effort}, messages=messages, max_tokens=4000)
+messages.append({"role": "assistant", "content": resp.content})     # 原样追加
+... 执行每个 tool_use 块，收集 tool_result 块 ...
+messages.append({"role": "user", "content": results})
+```
 
-**命令行参数改全局常量**：`--open` 等要影响 `plan()` 里用到的 `GRIP_OPEN` 等模块级常量，所以 `main()` 开头写
-`global GRIP_OPEN, ...` 再赋值。📘 Python 规定 `global` 声明必须出现在函数里第一次使用这个名字之前，
-否则报 `SyntaxError: name ... is used prior to global declaration`（`argparse` 的默认值就会先用到它）。
+- 模型的回复**原样**追加回去：Haiku 5.5 用的是自适应思考，它的 thinking 块必须原样传回；改动之前的轮次会让这些块失效。
+- 📘 **工具结果里带图像**：`tool_result` 的 `content` 可以是一个块的列表，这里是文字 + `{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", ...}}`。
+- 一次回复里可能有好几个工具调用（比如先 `move_to` 再 `gripper`）；按顺序执行，所有结果放在**同一条** user 消息里返回。
+- 遇到 `done`、回复里没有工具调用（或者 `stop_reason == "refusal"`），或者到了 `--max-actions`（25）就停。
+- 每做一个动作就重写一次 `record.json`（每次调用、结果、模型自己的判断、token、按每百万 $0.10 / $0.50 算的费用），按 Ctrl+C 中断也能留下日志。
+- 每次尝试结束后 `go_home`：先垂直抬到 15 cm（越过箱壁），再在关节空间插值回家；`finally` 里也会执行，所以按 Ctrl+C 机械臂也不会在半空中掉下来。
+- API 密钥由 SDK 自己从 `ANTHROPIC_API_KEY` 读，代码从不经手。
 
 ---
 

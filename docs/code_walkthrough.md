@@ -23,7 +23,7 @@ Python / PowerShell syntax is explained the first time it appears (marked 📘).
 | 6 evaluation | [`make_server_config.py`, `serve_pi05.py`](#15-remote-inference-make_server_configpy-and-cloudhf_jobsserve_pi05py) | run π₀.₅ on an HF Jobs GPU and drive the arm from the laptop |
 | 6 evaluation | [`make_gif.py`](#11-scriptsmake_gifpy) | cut an evaluation trial into a GIF for the README |
 | 6 evaluation | [`plot_results.py`](#12-scriptsplot_resultspy) | per-spot success bar chart from `results/*.md` |
-| 7 zero-shot | [`zero_shot/*`](#14-zero_shot-the-zero-shot-baseline) | kinematics, homography calibration, VLM pointing, real-robot grasp |
+| 7 zero-shot | [`zero_shot/*`](#14-zero_shot-the-training-free-baseline-vlm-agent) | kinematics, touch calibration, gripper measurement, the Claude Haiku agent |
 | internals | [What LeRobot does inside](#9-lerobot-internals-what-the-commands-we-call-do) | recording loop, dataset, training loop, ACT forward |
 
 ---
@@ -915,10 +915,18 @@ Replaces the submit function with "just print the config", so the JSON being sen
 
 ---
 
-## 14. `zero_shot/`: the zero-shot baseline
+## 14. `zero_shot/`: the training-free baseline (VLM agent)
 
-Design and results are in [09_zero_shot_vlm.md](09_zero_shot_vlm.md); this section is about the code. Everything runs as `python -m zero_shot.<file>`
-(from the repo root; `-m` makes Python treat `zero_shot` as a package so its files can import each other).
+Design and results are in [09_zero_shot_vlm.md](09_zero_shot_vlm.md); this section is about the code. Run the modules as `python -m zero_shot.<file>`
+from the repo root (`-m` makes Python treat `zero_shot` as a package, so its files can import each other); the two calibration scripts also run as plain files.
+
+| File | Role |
+|---|---|
+| `kinematics.py` | FK / IK on the SO-101 URDF |
+| `calibrate_touch.py` | touch calibration: teleoperate, touch tape squares, record tip positions |
+| `fit_touch_calib.py` | fit lens distortion + homography → `camera_calib.json` |
+| `measure_gripper.py` | fingertip gap at each opening → `gripper_geometry.json` |
+| `agent.py` | the Claude Haiku agent: tools, motion and safety layer, the loop |
 
 ### `kinematics.py`: forward / inverse kinematics
 
@@ -947,61 +955,79 @@ step = J.T @ solve(J @ J.T + λ² I, -r)          # damped least squares (DLS)
 - 📘 **Jacobian** J: the derivative of the residual with respect to each joint angle. Newton's method would use J's inverse directly, but with the arm stretched out or near a limit J is nearly singular
   and the step becomes absurdly large. Adding λ²I (damping) keeps the step bounded: that's DLS (also known as Levenberg–Marquardt).
 - **λ depends on the units**: 1° of joint motion moves the tip only about 3 mm, so J's entries are about 3e-3 and λ has to be around 1e-3; with a large λ (e.g. 0.05) λ² dwarfs JJᵀ and the solver barely moves.
-  With 1e-3 it converges to 0.1 mm in a few dozen iterations.
 - **Why only 4 joints**: wrist_roll only spins the gripper about its own axis; it changes neither the tip position nor the downward direction, so it stays fixed.
-- **The initial guess matters** (`solve_grasp`): from the folded pose shoulder_lift sits exactly at its −100° limit; the first step is clipped back to the limit and it's stuck.
-  So typical grasp poses from the demos are used as seeds (4 tried, best kept), with shoulder_pan estimated directly from the target's bearing.
+- **`solve_seeded`, the starting points**: from the folded pose shoulder_lift sits exactly at its −100° limit; the first step is clipped back to the limit and it's stuck.
+  So IK is also started from an even grid (shoulder_lift, elbow_flex ∈ {−60, −20, 20, 60}°, wrist_flex ∈ {30, 70}°, 32 seeds, shoulder_pan aimed at the target with `arctan2`),
+  plus the current pose. Keep the smallest error; among answers within 1 mm of it, the one whose largest joint change from now is smallest (so the arm doesn't swing round for nothing).
+  Nothing here comes from the demos.
 
-### `check_fk.py`: verifying FK without the robot
+### `calibrate_touch.py`: touch calibration
 
-Find the frame in each demo where the gripper "opens, then closes" (`grasp_frame`) and compute the tip position there.
-Table grasps should all be at the same height and the positions should form 5 clusters (5 start spots). The clustering is a hand-written k-means (`kmeans`):
-pick 5 initial centres by "farthest point", then repeat "assign each point to the nearest centre → move each centre to its cluster's mean".
+- **Teleoperation inside the script**: the leader arm (`SO101Leader`) and the follower are connected directly, and every 1/30 s `follower.send_action(leader.get_action())`.
+  The script has to own both serial ports itself, because it also reads the follower's joints at the moment of a touch (`lerobot-teleoperate` would hold the ports).
+- 📘 **Reading the keyboard without stopping the loop**: `input()` would block teleoperation. A background thread (`threading.Thread(daemon=True)`) reads lines from `sys.stdin`
+  and puts them in a `queue.Queue`; the loop checks it with `get_nowait()` every cycle. `daemon=True` lets Python exit without waiting for that thread.
+- On Enter: wait 0.3 s for the arm to settle, read the joints, FK → tip xyz, save a photo `touch_<n>.jpg`. `u` undoes the last point, `q` ends;
+  the first Enter saves `clean.jpg` (arm out of the way) for finding the tape squares.
+- **Exit**: disconnecting releases torque, so the instructions say to fold the arm to its rest pose with the leader *before* typing `q`.
 
-### `calibrate_from_demos.py`: the homography
+### `fit_touch_calib.py`: distortion + homography
 
-- `toy_pixel`: convert to HSV, keep pixels with hue 100–130 (blue) and high saturation, remove specks with a morphological opening, take the centre of the largest connected component.
-- 📘 **Homography** H (3×3): the mapping of one plane between two views, `[x, y, 1] ∝ H [u, v, 1]`.
-  The table in the overhead image and the table in the arm's frame are the same plane, so one H converts pixels to table coordinates without depth.
-- `cv2.findHomography(..., cv2.RANSAC, 0.015)`: RANSAC repeatedly picks 4 random pairs, solves an H, and keeps the one with the most points within 1.5 cm;
-  points from a wrong grasp detection or a bad colour mask are dropped as outliers.
-- **A second mapping, `H_pixel_to_place` (for the box)**: the H fitted on table grasp points alone is accurate (0.6 cm) inside that 10×10 cm patch,
-  but 24 cm off at the box. The third row of a homography (the perspective terms) is only constrained where there is data, and errors grow with distance from it.
-  So we also find the "release" frame in each demo: `frame_at` decodes a given frame of the dataset MP4 with PyAV (seek to 1 s before, then decode frame by frame up to the target time),
-  and pairs the toy's position in that image with the gripper position from FK, fitted together with the grasp points. Two patches 15 cm apart "pin down both ends" of the mapping: 1.3 cm at the box.
+- **Finding the squares** (done once and saved as `pairs.json`): grey image minus its Gaussian blur (σ = 15 px) = how much darker each pixel is than its surroundings;
+  > 45 levels → binary; `cv2.connectedComponentsWithStats` gives each blob's area, size and centroid; keep square-ish blobs of 40–500 px.
+  Each touch is matched to the nearest square after mapping it through a first rough fit, then refitted (a few rounds).
+- `undistort`: the inverse of $u_d = c + (u - c)(1 + k_1 r^2 + k_2 r^4)$ has no closed form, so 30 rounds of fixed-point iteration.
+- `fit`: 📘 `scipy.optimize.minimize(..., method="Nelder-Mead")` searches $(k_1, k_2)$ without gradients (a simplex of 3 points that reflects / shrinks towards lower cost);
+  inside the cost, `cv2.findHomography(..., 0)` fits $H$ by plain least squares on the undistorted points and returns the mean squared error in metres.
+- **Leave-one-out**: refit without point *t*, predict *t*; the median of these is the honest accuracy (8.3 mm here). Printed per point, so a bad touch stands out.
+- Output `camera_calib.json`: $k$, $H$, the table height (median tip z over the touches) and both error figures.
 
-### `pointing.py` and `eval_pointing.py`: VLM pointing
+### `measure_gripper.py`
 
-- The prompt asks the model to answer only with JSON: `[{"point_2d": [x, y], "label": "toy"}]`. `parse_point` cuts out the `[...]` with a regex and runs `json.loads`,
-  and also accepts a `bbox_2d` answer (taking the box centre).
-- Qwen3-VL's coordinates are **relative, on a 0–1000 scale**; `x / 1000 * width` gives pixels.
-- `do_sample=False`: greedy decoding, so the same image always gets the same answer and the evaluation is reproducible.
-- `eval_pointing.py` compares the VLM's point with the colour-detected toy centre, then converts the error to centimetres on the table with H.
+Lift to (20, 0, 12) cm with the agent's own planner, step the opening through 0 / 25 / 50 / 75 / 100, and ask for the ruler reading each time → `gripper_geometry.json`.
+In a `finally` block the gripper goes back to its start value and the arm goes home, even after Ctrl+C.
 
-### `run_grasp.py`: execution on the robot
+### `agent.py`: the agent
 
-**Planning (`plan`)**: first solve the grasp pose (`solve_grasp`), then the hover pose above it, seeded with the grasp solution. Descent and lift use `vertical_path`:
-8–12 points along a vertical line, one IK per point, each seeded with the previous solution ("warm start"), so neighbouring poses are close and the path goes straight down and up.
-The result is a list of named key poses (5 joints + gripper). If any step fails a check it raises `ValueError`, the attempt is logged as skipped, and the arm doesn't move.
+**Geometry helpers.**
+- `table_to_pixel`: the inverse direction of the calibration (table → undistorted pixel via $H^{-1}$, then `distort`), used to draw the grid and the fingertip marks.
+- `jaw_dir`: the direction from the fixed to the moving fingertip = the tip frame's $-x$ axis (`-fk(q)[:3, 0]`), flattened onto the table.
+- `fingertips_m`: the fixed fingertip (FK) and the moving one (fixed + direction × gap at the opening `q[5]`, `np.interp` over the measured table).
+- `tip_cm`: the midpoint of the two fingertips, in table cm; this is the "gripper position" the model sees and gives.
 
-The lift after the grasp goes straight up only to the hover height (~5 cm, where the toy is off the table); the "lift" (17 cm) and "above box" poses are then solved with `orient_weight=CARRY_TILT` (a weak pull towards vertical), because near the base the 5-joint arm can't keep the gripper vertical that high, and up there it doesn't need to.
+**Planning a move (`plan_line` → `plan_tip`).** The model's target is a midpoint; the IK tip is the fixed finger, so the target is shifted by half the gap against `jaw_dir`.
+`jaw_dir` depends on the final pose, so: plan, take the end pose, recompute the shift, plan again. `plan_tip` then tries, in order:
+1. `_line`: the tip along a straight line, IK every 1 cm, each point warm-started from the previous one; fingers down (`orient_weight` 0.05), or tilted (0.01) where vertical is impossible;
+2. `solve_seeded` + one joint-space jump (e.g. leaving the folded home pose, where the line fails);
+3. straight up to 15 cm, then the line.
+Each candidate goes through `_clear`: FK every 2° along the interpolation, tip never below the table (or, starting below that, never lower than the start). None safe → `ValueError`, which becomes the tool's error message.
 
-**Interpolation (`interpolate`)**: a straight line in joint space between key poses, with steps = largest joint change ÷ speed × 30 Hz,
-so no joint exceeds `--speed` (°/s) and commands never jump.
+**`Robot`.** Follower + both cameras via OpenCV (4 frames dropped before each picture, so it isn't a stale buffered one). `play` interpolates in joint space at ≤ 45°/s,
+then **waits until the joints are within 1.5° of the target** (≤ 2 s): the servos trail the commands, and the first real run showed the arm 2–4 cm short when the picture was taken right away.
+With `--dry-run` nothing is connected: the images are a recorded frame and "measured" joints are the last command, which tests the API plumbing and the planner for a cent.
+`home` is the pose read at start.
 
-**Path check before moving (`check_paths`)**: run FK on every interpolated command and refuse if the tip goes below `MIN_Z`;
-the "over to the box" segment must stay above `CARRY_MIN_Z` (14 cm) so the dangling toy doesn't hit the box wall. Before that segment the arm lifts to `CARRY_Z` (17 cm, above 90% of the demos' carry heights); the "lift" and "above box" poses use the looser `IK_TOL["carry"]`, because above ~13 cm the 5-joint arm can't keep the gripper vertical.
+**Tools (`TOOLS`, `run_tool`).** JSON-schema tool definitions with `strict: True` (the API then guarantees the arguments match the schema, e.g. numbers really are numbers).
+`move_to` / `gripper` act, then return `observation`: overhead image with the grid (`draw_grid`), wrist image, and a text line with the gripper position and the commanded and measured opening.
+If a move ends > 2 cm from its target, the text says it may be blocked. `--step` asks for Enter before each motion.
 
-**Connecting the arm (`Arm`)**: LeRobot's `SO101Follower` directly, so the same calibration files and low-level interface as the learned policies.
-`move` sends `send_action` every 1/30 s; `close` first returns slowly to the start pose, then disconnects. LeRobot turns torque off on disconnect by default,
-and disconnecting mid-air would drop the arm, so Ctrl+C (`KeyboardInterrupt`) takes the same path.
+**The loop (`attempt`).** A manual tool loop on the Messages API:
 
-**Diagnostics (`report`, `snapshot`)**: at the bottom and after closing, read the servos' actual angles, print the "commanded vs measured" tip height and write it to the CSV;
-also save overhead + wrist photos. Example: if the measured height is right but the gripper closes to 1 (nothing between the fingers), the horizontal position was off.
+```python
+resp = client.messages.create(model="claude-haiku-5-5", system=SYSTEM, tools=TOOLS,
+                              output_config={"effort": effort}, messages=messages, max_tokens=4000)
+messages.append({"role": "assistant", "content": resp.content})     # appended unchanged
+... run every tool_use block, collect tool_result blocks ...
+messages.append({"role": "user", "content": results})
+```
 
-**Command-line arguments changing module constants**: `--open` and friends must change module-level constants like `GRIP_OPEN` used in `plan()`, so `main()` starts with
-`global GRIP_OPEN, ...` before assigning them. 📘 Python requires the `global` statement to come before the first use of the name inside the function,
-otherwise `SyntaxError: name ... is used prior to global declaration` (the `argparse` defaults would use it first).
+- The assistant's content is appended **unchanged**: Haiku 5.5 thinks adaptively and its thinking blocks must be sent back exactly as received; editing earlier turns invalidates them.
+- 📘 **Images in a tool result**: a `tool_result`'s `content` can be a list of blocks, here text + `{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", ...}}`.
+- A response may contain several tool calls (e.g. `move_to` then `gripper`); they run in order and all results go back in **one** user message.
+- Stops on `done`, a response without tool calls (or `stop_reason == "refusal"`), or `--max-actions` (25).
+- `record.json` is rewritten after every action (each call, its result, the model's verdict, tokens, cost at $0.10 / $0.50 per M), so a run stopped with Ctrl+C still leaves its log.
+- After each attempt `go_home`: straight up to 15 cm (clears the box walls), then joint interpolation home; also in `finally`, so Ctrl+C never drops the arm mid-air.
+- The API key is read by the SDK from `ANTHROPIC_API_KEY`; the code never handles it.
 
 ---
 

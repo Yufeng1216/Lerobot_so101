@@ -72,7 +72,7 @@ Diffusion 和 SmolVLA 都显著好于 ACT（Fisher 精确检验 p = 0.025 和 0.
 config/          robot.example.json → 复制成 robot.json（COM 口、相机编号、HF 用户名）；机械臂标定
 scripts/         在 Windows 笔记本上运行：硬件检查、录数据、本地训练、评估、做 GIF
 cloud/           在别的机器上运行：Slurm 集群（Diffusion、SmolVLA）和 Hugging Face Jobs（π₀.₅）
-zero_shot/       免训练基线：SO-101 运动学、像素→桌面单应性、VLM 指向、真机抓取
+zero_shot/       免训练基线：SO-101 运动学、触碰标定、Claude Haiku 智能体
 docs/            教程，一个阶段一个文件（英文 *.md，中文 *.zh-CN.md）
 results/         逐次的评估记录表
 assets/          本页用的 GIF

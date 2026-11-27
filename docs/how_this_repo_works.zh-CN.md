@@ -142,7 +142,7 @@ Lerobot/
 │   │   ├── submit.sh      检查账号后提交任务
 │   │   └── train.sbatch   训练任务本身
 │   └── hf_jobs/           租用的 Hugging Face GPU：π₀.₅ 训练（train_pi05.py）和评估用的推理服务端（serve_pi05.py）
-├── zero_shot/             免训练基线（VLM + IK）：运动学、单应性标定、本地 VLM 指向、真机抓取脚本 run_grasp.py
+├── zero_shot/             免训练基线（VLM 智能体 + IK）：运动学、触碰标定、夹爪测量、Claude Haiku 智能体 agent.py
 ├── results/               每个策略真机评估的逐次记录表
 ├── assets/                README 用的 GIF 和图
 ├── docs/                  教程，一个阶段一个文件（中英文各一份）

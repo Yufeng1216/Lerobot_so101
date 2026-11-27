@@ -2,7 +2,7 @@
 
 **English** · [简体中文](09_zero_shot_vlm.zh-CN.md)
 
-PS: status: design and building blocks ready; the agent loop, a demo-free calibration and the evaluation are next.
+PS: status: calibration, gripper measurement and the agent are done and run on the real arm; the prompt is being debugged, then it gets frozen for the 40 trials.
 
 ## 1. Why this experiment
 
@@ -12,44 +12,59 @@ step by step, how to do the task. Putting it on **the same task with the same ev
 
 > How much do 50 human demos and training actually add over "an off-the-shelf model that just decides"? And where does each one fail?
 
-To keep the comparison honest, nothing in this baseline is taken from the demos: calibration and heights are measured on the setup, and every setting is frozen before the 40 trials.
+To keep the comparison honest, nothing in this baseline comes from the demos. The camera calibration, the heights and the gripper size are measured on the setup,
+the IK starts from an even grid of poses, and every setting is frozen before the 40 trials.
 
 ## 2. Design
 
 ### 2.1 Why the model doesn't output joint angles
 
-An untrained model doesn't know this arm's kinematics, so if it had to output joint angles it would inch forward look-move-look for dozens of steps:
-a long-horizon problem that needs a very large model. With a Cartesian interface the same task takes 5–10 decisions
+An untrained model doesn't know this arm's kinematics. If it had to output joint angles it would inch forward look-move-look for dozens of steps:
+a long-horizon problem that needs a very large model. With a Cartesian interface the same task takes about 5–10 decisions
 (above the toy, down, close, up, over the box, release), which a small, cheap model can handle.
 
 IK plays the role of a driver here (like a car's steering turning "go left" into a wheel angle); it makes no task decisions.
-This is also how published training-free systems are built (Code as Policies, VoxPoser, MOKA, ReKep, Gemini Robotics-ER): the large model decides, a generic Cartesian / IK layer executes.
+Published training-free systems are built the same way (Code as Policies, VoxPoser, MOKA, ReKep, Gemini Robotics-ER): the large model decides, a generic Cartesian / IK layer executes.
 
 | | Who decides |
 |---|---|
-| where to grasp, how high to lift, the path, when to release, whether to retry | **the VLM** |
-| turning "gripper to (x, y, z)" into joint angles | IK (§3.4) |
-| joint limits, speed limit, never below the table | safety checks |
+| where to grasp, how wide to open, how high to lift, the path, when to release, whether to retry, when to give up | **the VLM** |
+| turning "gripper to (x, y, z)" into joint angles | IK (§3.6) |
+| workspace, never into the table, joint speed limit | safety layer (§3.7) |
 
-### 2.2 Tools given to the model
+### 2.2 Tools
 
 | Tool | What it does |
 |---|---|
-| `look()` | returns the overhead and wrist images and the current gripper position (x, y, z) |
-| `move_to(x, y, z)` | moves the gripper tip there, pointing down (IK + joint-speed limit + path check) |
-| `gripper(opening)` | opens (0–100) or closes the gripper |
-| `done(result)` | ends the attempt |
+| `look()` | returns the overhead and wrist images and the state |
+| `move_to(x, y, z)` | moves the gripper in a straight line; (x, y, z) is the point **midway between the fingertips**, in table cm, z = height above the table |
+| `gripper(opening)` | 0 = closed … 100 = fully open |
+| `done(success, reason)` | ends the attempt with the model's own verdict |
 
-The loop is closed: after every move the model looks again, so it can correct a missed grasp or a slipping toy.
+`move_to` and `gripper` return the new images and state right away, so **one model call = one action**: the loop is closed, and the model sees every result before deciding the next step.
 
-### 2.3 Model and cost
+### 2.3 What the model sees
 
-Claude Haiku 5.5 through the Anthropic API: it reads images and calls tools; $0.10 / $0.50 per million input / output tokens.
-About ten calls per attempt, so 40 attempts cost well under a dollar. The account and key are set up by the user (`ant auth login` or `ANTHROPIC_API_KEY`) and never written into the repo.
+- **Overhead image with a 5 cm grid** in table coordinates (cm), so the model reads positions off the picture instead of guessing pixel scales.
+  A red dot marks the table point under the gripper, a short red line joins the two fingertips.
+- **Wrist image**: the toy between (or beside) the fingers, up close.
+- **State text**: gripper position, and the gripper opening both commanded and measured.
+  If the fingers closed on the toy, the measured opening stays well above the command (the toy is in the way); if they close to ~1, they missed.
+  That one number is how the model knows whether it is holding anything.
+- **Blocked moves**: if the gripper ends more than 2 cm from where it was sent (the servos stop when a finger or the held toy hits the box wall), the result says so.
+
+The prompt contains only facts: the task, the coordinate convention, the gripper's layout, sizes measured with a ruler (toy 3 cm tall and 6–7 cm wide, so a held toy hangs up to ~3 cm below the fingertips; box walls 8 cm;
+fingertip gap at each opening) and what each tool does. **How to grasp is not written anywhere**; the model plans that itself.
+
+### 2.4 Model and cost
+
+Claude Haiku 5.5 through the Anthropic API (`claude-haiku-5-5`), adaptive thinking at effort `medium`, called with the official Python SDK; $0.10 / $0.50 per million input / output tokens.
+Each call carries two images (~800 tokens). A 30-action attempt cost **about $0.02**, so 40 attempts are well under a dollar.
+The key is a user-level environment variable `ANTHROPIC_API_KEY` set by the user; it never appears in the repo, in logs or in the chat.
 
 ## 3. Building blocks
 
-The model reasons in table coordinates (centimetres in the arm's base frame), so it needs a pixel → table mapping, and `move_to` needs FK and IK.
+The model reasons in table coordinates, so we need pixel ↔ table (§3.1–3.3), the gripper's geometry (§3.4), and FK / IK to drive the arm (§3.5–3.6).
 
 ### 3.1 From pixels to the table: homography
 
@@ -59,28 +74,65 @@ A plane seen through a perspective projection onto another plane (the image) is 
 $$\begin{bmatrix} x \\ y \\ 1 \end{bmatrix} \sim H \begin{bmatrix} u \\ v \\ 1 \end{bmatrix},\qquad x = \frac{h_{11}u + h_{12}v + h_{13}}{h_{31}u + h_{32}v + h_{33}},\quad y = \frac{h_{21}u + h_{22}v + h_{23}}{h_{31}u + h_{32}v + h_{33}}$$
 
 $H$ is defined up to scale, so it has 8 degrees of freedom. Each "pixel ↔ table point" pair gives 2 equations, so **4 pairs solve it**; more pairs go into least squares.
-The $h_{31}, h_{32}$ in the denominator are the perspective effect (near things look bigger). So **no depth camera** and no camera intrinsics are needed.
+The $h_{31}, h_{32}$ in the denominator are the perspective effect (near things look bigger). So **no depth camera** is needed.
 
-### 3.2 Calibration without the demos
+### 3.2 Lens distortion
 
-To find $H$, touch 6–8 points spread over the table with the gripper tip (teleoperated, or by moving the arm by hand with torque off), read the tip position by FK (§3.3),
-and mark the same points in the overhead image. That is a standard camera–robot calibration, done once for the setup, with no task demonstrations involved.
-The heights the model needs (box wall, toy) are measured with a ruler.
+Limit: a homography assumes a pinhole camera, where straight lines stay straight. Our overhead camera is wide-angle: the table edge visibly bends near the image border (barrel distortion).
+With a plain homography, points away from the calibration marks were off by **1–3 cm**. So: undistort first, then apply $H$.
 
-### 3.3 Forward kinematics (FK)
+The standard radial model, around the image centre $c$ (in units of $f$ = 400 px):
+
+$$u_d = c + (u - c)\,\big(1 + k_1 r^2 + k_2 r^4\big),\qquad r = \frac{\lVert u - c \rVert}{f}$$
+
+$u$ is where an ideal pinhole camera would see the point, $u_d$ where ours does. $k_1 < 0$ is barrel distortion. We need the inverse (pixel → ideal pixel), which has no closed form,
+so it is solved by fixed-point iteration ($u \leftarrow c + (u_d - c) / (1 + k_1 r^2 + k_2 r^4)$, 30 rounds). $k_1, k_2$ and $H$ are fitted **together** from the calibration points:
+for each candidate $(k_1, k_2)$, undistort, fit $H$ by least squares, measure the error; Nelder–Mead searches over $(k_1, k_2)$. Result: $k_1 = -0.47$, $k_2 = 0.28$.
+
+### 3.3 Touch calibration (no demos)
+
+1. Put small dark tape squares on the table where the toy and the box go, spread out, not in a line, **all visible to the overhead camera** (one hidden behind the box wall is useless).
+2. Take a photo with the arm out of the way; the script finds each square as a dark blob against the local background (pixel = blob centroid).
+3. Teleoperate the follower and touch the centre of each square with the closed fingertips; at each touch the script records the joint angles, and FK (§3.5) gives the tip position.
+
+Each square thus gives one "pixel ↔ table point" pair. We touched 16; 14 were used (one square was grey tape the detector missed; at one, deep inside the box with the arm fully stretched, the touch was 3 cm off).
+
+| | |
+|---|---|
+| fit error (median) | ~6 mm |
+| **leave-one-out error** (fit without a point, predict it; median) | **8.3 mm** |
+| table height in the arm frame (median tip z over the touches) | −0.7 cm |
+
+Leave-one-out is the honest number: it is the error at a place the fit has not seen. With only the first 6 squares (all in one corner of the image) it was 1–3 cm, because a homography
+is only pinned down where there are points; spreading them over the whole working area fixed that.
+The toy is 6–7 cm wide and the fingers open up to 15 cm, so ~1 cm is within the margin, and the wrist camera lets the model correct the rest.
+
+PS: the calibration stays valid only while the camera and the arm's base don't move. The base is clamped; if the camera gets bumped, re-align it (`scripts/align_camera.py`) or calibrate again (~15 minutes).
+
+### 3.4 Gripper geometry
+
+The SO-101 gripper has **one fixed finger and one moving finger**. The point the URDF calls the tip (`gripper_frame_link`) sits on the fixed finger.
+Limit: if `move_to` positioned that point, a model aiming at the toy's centre puts the fixed finger *on* the toy, the toy is never between the fingers, and every grasp misses.
+So `move_to` positions the **midpoint between the fingertips at the current opening** instead:
+
+- **Gap** between the fingertips, measured with a ruler at openings 0 / 25 / 50 / 75 / 100: 0 / 4.5 / 9 / 12.7 / 15 cm (linear interpolation between them).
+- **Direction** of the moving finger: from the URDF, the moving jaw sits on the $+x$ side of `gripper_link`, and the tip frame is that frame turned 180° about $y$, so the direction is $-x$ of the tip frame, projected on the table.
+- midpoint = fixed fingertip + direction × gap / 2. Since the direction depends on the final pose, the target is converted and solved twice.
+
+### 3.5 Forward kinematics (FK)
 
 The arm is a chain of "link + joint". The URDF gives each joint's fixed offset (translation + rotation) from its parent link and its rotation axis.
-So the gripper tip's pose in the base frame is a product of 4×4 homogeneous transforms:
+So the tip's pose in the base frame is a product of 4×4 homogeneous transforms:
 
 $$T_{\text{tip}}(q) = \prod_{i=1}^{5} \Big( T_i^{\text{fixed}} \cdot \mathrm{Rot}(\text{axis}_i,\ q_i) \Big) \cdot T^{\text{tip}}$$
 
 The top-left 3×3 of $T$ is the orientation, the top-right 3×1 the position.
 
 PS: in LeRobot 0.7 the SO-101 joint readings are in degrees with 0° = middle of the calibrated range, the same zero as the official `so101_new_calib.urdf`, so they go straight in.
-We checked against the demos: over 35 table grasps, FK puts the gripper tip at **−0.8 ± 1.0 cm** height (tips pressing slightly into the soft table mat), and the grasp positions form 5 clusters, exactly the 5 taped marks.
-With a wrong zero or direction these numbers would be all over the place.
+The touch calibration doubles as a check: the 11 touches on the bare table all come out at the same height, **−0.8 ± 0.2 cm**, across the whole working area.
+With a wrong zero or a flipped axis, the height would swing by centimetres from one side to the other.
 
-### 3.4 Inverse kinematics (IK): damped least squares
+### 3.6 Inverse kinematics (IK): damped least squares
 
 IK goes the other way: given "tip at $p^*$, gripper pointing down", find the joint angles $q$. The SO-101 has only 5 joints (and wrist_roll only spins the gripper about itself, not moving the tip),
 so an arbitrary orientation is impossible, but "position + pointing down" is solvable.
@@ -98,12 +150,37 @@ $$\Delta q = -J^T \big(J J^T + \lambda^2 I\big)^{-1} r$$
   Adding $\lambda^2 I$ makes the step shrink automatically near singularities. That is **damped least squares** (the Levenberg-Marquardt idea).
 - PS: $\lambda$ has to match the units: 1° of joint motion moves the tip only about 3 mm, so Jacobian entries are around $10^{-3}$ and $\lambda \approx 10^{-3}$.
 - After each step the angles are clipped to the URDF joint limits.
-- The initial guess matters: from the folded start pose shoulder_lift sits right at its −100° limit and the solver gets stuck. So several typical grasp poses from the demos are used as seeds, keeping the best result. (Today these seeds are typical grasp poses from the demos; for this baseline they will be replaced by seeds spread evenly over the joint ranges, so nothing comes from the demos.)
+- High up (above ~13 cm) a 5-joint arm can't keep the gripper vertical everywhere; then $w$ drops to 0.01 and the gripper may tilt a little.
+- **Seeds**: from the folded start pose shoulder_lift sits at its −100° limit and the solver gets stuck. So it also starts from an **even grid** over the joint ranges
+  (shoulder_lift and elbow_flex at −60 / −20 / 20 / 60°, wrist_flex at 30 / 70°, shoulder_pan pointed at the target) and keeps the best; among equally good answers, the one closest to the current pose.
 
-Result: **0.1 mm** error on table targets, gripper pointing straight down.
+### 3.7 Motion and safety layer
 
-## 4. Plan
+The model can't bypass any of this; a refused move comes back to it as an error message, and it picks another.
 
-1. Calibrate as in §3.2; measure the box and toy heights.
-2. Write the agent loop and test it offline on recorded frames (no arm).
-3. A few real attempts, then freeze the prompt and settings and run the 40-trial protocol of [08_evaluation.md](08_evaluation.md).
+- **Workspace**: x 5–38 cm, y −20–33 cm, z 0–25 cm (the touch-calibrated area).
+- **Straight lines**: the path is solved every 1 cm along the line, each point warm-started from the previous one, so the gripper really moves straight (e.g. straight down onto the toy).
+  If that fails (e.g. leaving the folded home pose), the target is solved from the seeds and reached by joint interpolation; if that would dip towards the table, it goes straight up to 15 cm first.
+- **Checked before moving**: forward kinematics every 2° along the commanded motion; the tip must stay above the table.
+- **Speed**: every joint at most 45°/s.
+- **Wait until arrived**: the servos trail the commands, so after each motion the script waits until the joints are within 1.5° of the target (at most 2 s) before taking pictures; otherwise the model would judge a pose the arm hasn't reached yet.
+- **Home** = the folded pose the arm is in when the script starts (read from the robot, not from the demos). After each attempt: straight up to 15 cm, then home.
+
+## 4. Running it
+
+Everything from the repo root, in the `lerobot` conda env.
+
+```powershell
+python zero_shot/calibrate_touch.py                                  # touch the tape squares (§3.3)
+python zero_shot/fit_touch_calib.py outputs/zero_shot/calib_touch/<time>   # -> zero_shot/camera_calib.json
+python -m zero_shot.measure_gripper                                  # fingertip gap at 0..100 (§3.4)
+python -m zero_shot.agent --dry-run --frame data/Yufeng1216/rollout_eval_pi05:0   # no robot: recorded frame, moves only planned
+python -m zero_shot.agent --trials 1 --step                          # real arm, Enter before every motion
+python -m zero_shot.agent --trials 5 --name vlm_agent                # an evaluation block
+```
+
+`fit_touch_calib.py` needs a `pairs.json` next to the touches (touch number → pixel of its square in `clean.jpg`). Every attempt logs each step's images and a `record.json`
+(every action, the model's own verdict, time, tokens, cost) under `outputs/zero_shot/<name>/`.
+
+PS: protocol: the agent calls the API once per action, so one attempt takes about 1–3 minutes, longer than the 30 s limit of the trained policies.
+Its limit is therefore **25 actions** instead of 30 seconds, and the time is recorded; this is the one place it differs from [08_evaluation.md](08_evaluation.md).

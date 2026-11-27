@@ -73,7 +73,7 @@ Diffusion and SmolVLA are each better than ACT (Fisher's exact test p = 0.025 an
 config/          robot.example.json → copy to robot.json (COM ports, camera indices, HF user); arm calibration
 scripts/         runs on the Windows laptop: hardware checks, recording, local training, evaluation, GIFs
 cloud/           runs elsewhere: Slurm cluster (Diffusion, SmolVLA) and Hugging Face Jobs (π₀.₅)
-zero_shot/       the training-free baseline: SO-101 kinematics, pixel→table homography, VLM pointing, real-robot grasp
+zero_shot/       the training-free baseline: SO-101 kinematics, touch calibration, the Claude Haiku agent
 docs/            the tutorial, one file per stage (English *.md, Chinese *.zh-CN.md)
 results/         per-trial evaluation sheets
 assets/          GIFs for this page

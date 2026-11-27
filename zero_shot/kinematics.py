@@ -2,8 +2,8 @@
 
 Joint angles use LeRobot's convention for the SO-101 follower (`use_degrees=True`, the default):
 degrees, 0 = middle of the calibrated range. The official `so101_new_calib.urdf` is built for the
-same zero, so the angles go straight into the URDF chain (verified against the recorded demos with
-`python -m zero_shot.check_fk`).
+same zero, so the angles go straight into the URDF chain (checked by the touch calibration: touches all
+over the table come out at the same height, see docs/09 §3.5).
 
 Coordinates: metres, in the URDF base frame (`base_link`): origin under the arm's base, z up.
 
@@ -132,21 +132,24 @@ def ik(target_xyz, q0_deg, down=(0.0, 0.0, -1.0), iters: int = 200, damping: flo
     return q, float(np.linalg.norm(fk(q)[:3, 3] - target))
 
 
-def solve_grasp(target_xyz, wrist_roll: float = -90.0) -> tuple[np.ndarray, float]:
-    """IK for a top-down grasp, tried from several starting poses; returns the best (angles, error).
+def solve_seeded(target_xyz, q_now, orient_weight: float = 0.05) -> tuple[np.ndarray, float]:
+    """IK from the current pose and from a fixed grid of seeds spread over the joint ranges.
 
-    Starting from the folded rest pose fails: shoulder_lift sits at its -100 deg limit there and the
-    solver gets stuck against it. The seeds are typical grasp poses from the recorded demos
-    (shoulder_lift 0..40, elbow -20..40, wrist_flex 50..65), with shoulder_pan pointed at the target.
+    Used by the VLM agent, which must not borrow anything from the demonstrations: the seeds are just
+    an even grid (shoulder_lift and elbow_flex at -60/-20/20/60, wrist_flex at 30/70 deg), with
+    shoulder_pan pointed at the target and wrist_roll kept as it is now. Returns the solution with
+    the smallest position error; on ties (all within 1 mm) the one closest to the current pose.
     """
     x, y, _ = target_xyz
-    pan = -np.degrees(np.arctan2(y, x - CHAIN[0].origin[0, 3]))  # pan axis sits ~4 cm in front of base origin
-    best = None
-    for lift, elbow, wrist in [(20, 10, 60), (0, 40, 50), (40, -20, 60), (-30, 70, 60)]:
-        q, err = ik(target_xyz, [pan, lift, elbow, wrist, wrist_roll])
-        if best is None or err < best[1]:
-            best = (q, err)
-    return best
+    pan = -np.degrees(np.arctan2(y, x - CHAIN[0].origin[0, 3]))
+    roll = float(q_now[4])
+    seeds = [np.array(q_now[:5], float)]
+    seeds += [np.array([pan, lift, elbow, wrist, roll]) for lift in (-60, -20, 20, 60)
+              for elbow in (-60, -20, 20, 60) for wrist in (30, 70)]
+    sols = [ik(target_xyz, s, orient_weight=orient_weight) for s in seeds]
+    best_err = min(e for _, e in sols)
+    good = [(q, e) for q, e in sols if e <= best_err + 1e-3]
+    return min(good, key=lambda s: np.abs(s[0] - q_now[:5]).max())
 
 
 if __name__ == "__main__":
