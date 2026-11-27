@@ -51,36 +51,39 @@ VLM agent: a separate demo run after the evaluation (same frozen agent), 3× spe
 
 > **Status:** all five evaluated, 40 real-robot trials each.
 
-| Policy | Success | 95% CI | Grasped, not placed | Not grasped | Per spot ①②③④⑤ | Sheet · videos |
-|---|---|---|---|---|---|---|
-| ACT | **14/40** (35%) | 22–51% | 4 | 22 | 1 · 0 · 2 · 6 · 5 | [act](results/act.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_act) |
-| Diffusion Policy | **25/40** (62.5%) | 47–76% | 7 | 8 | 6 · 6 · 4 · 7 · 2 | [diffusion](results/diffusion.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_diffusion) |
-| SmolVLA | **26/40** (65%) | 50–78% | 0 | 14 | 2 · 3 · 7 · 7 · 7 | [smolvla](results/smolvla.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_smolvla) |
-| π₀.₅ | **34/40** (85%) | 71–93% | 0 | 6 | 7 · 5 · 7 · 8 · 7 | [pi05](results/pi05.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_pi05) |
-| VLM agent + IK | **29/40** (72.5%) | 57–84% | 3 | 8 | 7 · 6 · 7 · 4 · 5 | [vlm_agent](results/vlm_agent.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/vlm_agent_eval_logs) |
+| Policy | Success | 95% CI | Grasped, not placed | Not grasped | Per spot ①②③④⑤ | Time to success | Sheet · videos |
+|---|---|---|---|---|---|---|---|
+| ACT | **14/40** (35%) | 22–51% | 4 | 22 | 1 · 0 · 2 · 6 · 5 | 12 s | [act](results/act.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_act) |
+| Diffusion Policy | **25/40** (62.5%) | 47–76% | 7 | 8 | 6 · 6 · 4 · 7 · 2 | 15 s | [diffusion](results/diffusion.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_diffusion) |
+| SmolVLA | **26/40** (65%) | 50–78% | 0 | 14 | 2 · 3 · 7 · 7 · 7 | 14 s | [smolvla](results/smolvla.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_smolvla) |
+| π₀.₅ | **34/40** (85%) | 71–93% | 0 | 6 | 7 · 5 · 7 · 8 · 7 | 11 s | [pi05](results/pi05.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_pi05) |
+| VLM agent + IK | **29/40** (72.5%) | 57–84% | 3 | 8 | 7 · 6 · 7 · 4 · 5 | 92 s | [vlm_agent](results/vlm_agent.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/vlm_agent_eval_logs) |
 
-<sub>Success = toy released inside the box within 30 s (VLM agent: within 25 model calls, see [docs/09](docs/09_zero_shot_vlm.md)). 95% CI: Wilson score interval. Per spot: successes out of 8.
+<sub>Success = toy released inside the box within 30 s (VLM agent: within 25 model calls, see [docs/09](docs/09_zero_shot_vlm.md)). 95% CI: Wilson score interval. Per spot: successes out of 8. Time to success: median over the successful trials, real seconds from start to release
+(trained policies: recorded frames corrected for the control loop's actual rate, plus the operator's reaction time to end it; VLM agent: wall clock).
 Diffusion and SmolVLA are each better than ACT (Fisher's exact test p = 0.025 and 0.013); they are not distinguishable from each other (p = 1.0).
 π₀.₅ is better than ACT (p < 0.0001) and Diffusion (p = 0.041); vs. SmolVLA p = 0.069. π₀.₅ ran on a cloud GPU through remote inference ([docs/07](docs/07_pi05.md)).
 The VLM agent is better than ACT (p = 0.002) and not distinguishable from Diffusion, SmolVLA or π₀.₅ (p = 0.47, 0.63, 0.27).</sub>
 
 ![Per-spot success of all five policies](assets/results.svg)
 
-**In short**
-
-- **Pretraining pays off.** The two pretrained VLAs never dropped a grasped toy, and π₀.₅ (4.1 B, full fine-tune) was the most reliable at 34/40; ACT, trained from scratch on the same 50 demos, managed 14/40.
-- **A general model with no robot training gets surprisingly far.** Claude Haiku 5.5, given only measured geometry and four tools, placed the toy 29 times out of 40, statistically level with the trained policies except ACT.
-- **But it is slow.** It thinks before every action: a median 100 s and about $0.03 per trial, against a learned policy acting at 30 Hz. It was weakest at spot ④, next to the box wall.
-- **Caveat:** 40 trials per policy give wide intervals; only the differences with ACT (and π₀.₅ vs. Diffusion) are significant.
-
-| Policy | Steps × batch | Samples seen (epochs) | Train time | Inference per chunk | Model |
+| Policy | Steps × batch | Samples seen (epochs) | Train time | Inference | Model |
 |---|---|---|---|---|---|
 | ACT | 50k × 8 | 400k (≈27) | 4.0 h, RTX 3070 Laptop | ~47 ms | [🤗](https://huggingface.co/Yufeng1216/act_so101_pick_place) |
 | Diffusion Policy | 100k × 8 | 800k (≈53) | ≈4 h, V100 | ~200 ms (DDIM, 10 steps) | [🤗](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) |
 | SmolVLA | 20k × 32 | 640k (≈43) | ≈14 h, V100 | ~0.38 s, RTX 3070 Laptop | [🤗](https://huggingface.co/Yufeng1216/smolvla_so101_pick_place) |
 | π₀.₅ | 3k × 32 | 96k (≈6) | 7.1 h, A100 80 GB (≈ $18) | ~0.45 s, A10G (HF Jobs, remote) | [🤗](https://huggingface.co/Yufeng1216/pi05_so101_pick_place) |
+| VLM agent + IK | — | none | none | ~9 s per decision (Haiku API call + arm motion) | Claude Haiku 5.5 (API) |
 
-<sub>Steps aren't comparable across rows (different batch sizes, model sizes and pretraining), so samples seen and training time are listed to compare budgets. Epochs over the 15k-frame training split.</sub>
+<sub>Steps aren't comparable across rows (different batch sizes, model sizes and pretraining), so samples seen and training time are listed to compare budgets. Epochs over the 15k-frame training split.
+Inference: one forward pass for a chunk of actions, executed at 30 Hz, for the trained policies; the VLM agent makes one model call per action and waits for the arm to arrive, median 8.9 s per call.</sub>
+
+**In short**
+
+- **Pretraining pays off.** The two pretrained VLAs never dropped a grasped toy, and π₀.₅ (4.1 B, full fine-tune) was the most reliable at 34/40; ACT, trained from scratch on the same 50 demos, managed 14/40.
+- **A general model with no robot training gets surprisingly far.** Claude Haiku 5.5, given only measured geometry and four tools, placed the toy 29 times out of 40, statistically level with the trained policies except ACT.
+- **But it is slow.** It thinks before every action: a success takes a median 92 s (about $0.03 per trial), against 11–15 s for the trained policies acting at 30 Hz. It was weakest at spot ④, next to the box wall.
+- **Caveat:** 40 trials per policy give wide intervals; only the differences with ACT (and π₀.₅ vs. Diffusion) are significant.
 
 ## Repository
 

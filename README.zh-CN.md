@@ -50,36 +50,39 @@ VLM 智能体：评估结束后单独录的一次演示（同一个冻结的智�
 
 > **状态：** 五个都测完了，每个 40 次真机评估。
 
-| 策略 | 成功 | 95% 区间 | 抓起没放进 | 没抓起 | 各点位 ①②③④⑤ | 记录 · 录像 |
-|---|---|---|---|---|---|---|
-| ACT | **14/40**（35%） | 22–51% | 4 | 22 | 1 · 0 · 2 · 6 · 5 | [act](results/act.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_act) |
-| Diffusion Policy | **25/40**（62.5%） | 47–76% | 7 | 8 | 6 · 6 · 4 · 7 · 2 | [diffusion](results/diffusion.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_diffusion) |
-| SmolVLA | **26/40**（65%） | 50–78% | 0 | 14 | 2 · 3 · 7 · 7 · 7 | [smolvla](results/smolvla.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_smolvla) |
-| π₀.₅ | **34/40**（85%） | 71–93% | 0 | 6 | 7 · 5 · 7 · 8 · 7 | [pi05](results/pi05.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_pi05) |
-| VLM 智能体 + IK | **29/40**（72.5%） | 57–84% | 3 | 8 | 7 · 6 · 7 · 4 · 5 | [vlm_agent](results/vlm_agent.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/vlm_agent_eval_logs) |
+| 策略 | 成功 | 95% 区间 | 抓起没放进 | 没抓起 | 各点位 ①②③④⑤ | 成功用时 | 记录 · 录像 |
+|---|---|---|---|---|---|---|---|
+| ACT | **14/40**（35%） | 22–51% | 4 | 22 | 1 · 0 · 2 · 6 · 5 | 12 s | [act](results/act.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_act) |
+| Diffusion Policy | **25/40**（62.5%） | 47–76% | 7 | 8 | 6 · 6 · 4 · 7 · 2 | 15 s | [diffusion](results/diffusion.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_diffusion) |
+| SmolVLA | **26/40**（65%） | 50–78% | 0 | 14 | 2 · 3 · 7 · 7 · 7 | 14 s | [smolvla](results/smolvla.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_smolvla) |
+| π₀.₅ | **34/40**（85%） | 71–93% | 0 | 6 | 7 · 5 · 7 · 8 · 7 | 11 s | [pi05](results/pi05.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_pi05) |
+| VLM 智能体 + IK | **29/40**（72.5%） | 57–84% | 3 | 8 | 7 · 6 · 7 · 4 · 5 | 92 s | [vlm_agent](results/vlm_agent.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/vlm_agent_eval_logs) |
 
-<sub>成功 = 30 秒内玩具放进盒子并松开（VLM 智能体：25 次模型调用之内，见 [docs/09](docs/09_zero_shot_vlm.zh-CN.md)）。95% 区间：Wilson 区间。各点位：8 次里成功几次。
+<sub>成功 = 30 秒内玩具放进盒子并松开（VLM 智能体：25 次模型调用之内，见 [docs/09](docs/09_zero_shot_vlm.zh-CN.md)）。95% 区间：Wilson 区间。各点位：8 次里成功几次。成功用时：成功的那些次的中位数，从开始到松手的真实秒数
+（训练的策略：录到的帧数按控制循环的实际频率换算，另含操作者按键结束的反应时间；VLM 智能体：实际墙钟时间）。
 Diffusion 和 SmolVLA 都显著好于 ACT（Fisher 精确检验 p = 0.025 和 0.013），两者之间分不出差别（p = 1.0）。
 π₀.₅ 好于 ACT（p < 0.0001）和 Diffusion（p = 0.041）；和 SmolVLA 比 p = 0.069。π₀.₅ 在云端 GPU 上通过远程推理运行（[docs/07](docs/07_pi05.zh-CN.md)）。
 VLM 智能体好于 ACT（p = 0.002），和 Diffusion、SmolVLA、π₀.₅ 分不出差别（p = 0.47、0.63、0.27）。</sub>
 
 ![五个策略各点位的成功率](assets/results.svg)
 
-**简单总结**
-
-- **预训练很值。** 两个预训练的 VLA 只要抓起来就没掉过，π₀.₅（41 亿参数，全量微调）最稳，34/40；同样 50 条示范、从零训练的 ACT 只有 14/40。
-- **没在机器人数据上训练过的通用模型，也能走得很远。** Claude Haiku 5.5 只拿到量出来的几何信息和四个工具，40 次放进去 29 次，除了 ACT，和训练过的策略在统计上分不出高下。
-- **但它很慢。** 每个动作前都要想一遍：每次中位数 100 秒、约 $0.03，而训练出来的策略是 30 Hz 直接出动作。它在 ④ 号点最弱，那里紧挨着箱壁。
-- **注意：** 每个策略只测 40 次，区间都很宽；显著的只有和 ACT 的差别（以及 π₀.₅ 比 Diffusion）。
-
-| 策略 | 步数 × batch | 看过的样本（epoch） | 训练时长 | 每个动作块推理 | 模型 |
+| 策略 | 步数 × batch | 看过的样本（epoch） | 训练时长 | 推理 | 模型 |
 |---|---|---|---|---|---|
 | ACT | 50k × 8 | 400k (≈27) | 4.0 h，RTX 3070 Laptop | ~47 ms | [🤗](https://huggingface.co/Yufeng1216/act_so101_pick_place) |
 | Diffusion Policy | 100k × 8 | 800k (≈53) | ≈4 h，V100 | ~200 ms（DDIM 10 步） | [🤗](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) |
 | SmolVLA | 20k × 32 | 640k (≈43) | ≈14 h，V100 | ~0.38 s，RTX 3070 Laptop | [🤗](https://huggingface.co/Yufeng1216/smolvla_so101_pick_place) |
 | π₀.₅ | 3k × 32 | 96k (≈6) | 7.1 h，A100 80 GB（≈ $18） | ~0.45 s，A10G（HF Jobs，远程） | [🤗](https://huggingface.co/Yufeng1216/pi05_so101_pick_place) |
+| VLM 智能体 + IK | — | 不训练 | 不训练 | 每次决策 ~9 秒（Haiku API 调用 + 机械臂运动） | Claude Haiku 5.5（API） |
 
-<sub>各行的步数不能直接比（batch、模型大小、有没有预训练都不同），所以列出看过的样本数和训练时长来对照预算。epoch 按 1.5 万帧的训练集计算。</sub>
+<sub>各行的步数不能直接比（batch、模型大小、有没有预训练都不同），所以列出看过的样本数和训练时长来对照预算。epoch 按 1.5 万帧的训练集计算。
+推理：训练的策略是一次前向算出一个动作块，按 30 Hz 执行；VLM 智能体每个动作调用一次模型，再等机械臂到位，每次调用中位数 8.9 秒。</sub>
+
+**简单总结**
+
+- **预训练很值。** 两个预训练的 VLA 只要抓起来就没掉过，π₀.₅（41 亿参数，全量微调）最稳，34/40；同样 50 条示范、从零训练的 ACT 只有 14/40。
+- **没在机器人数据上训练过的通用模型，也能走得很远。** Claude Haiku 5.5 只拿到量出来的几何信息和四个工具，40 次放进去 29 次，除了 ACT，和训练过的策略在统计上分不出高下。
+- **但它很慢。** 每个动作前都要想一遍：成功一次中位数要 92 秒（每次约 $0.03），而训练出来的策略 30 Hz 直接出动作，只要 11–15 秒。它在 ④ 号点最弱，那里紧挨着箱壁。
+- **注意：** 每个策略只测 40 次，区间都很宽；显著的只有和 ACT 的差别（以及 π₀.₅ 比 Diffusion）。
 
 ## 仓库结构
 
