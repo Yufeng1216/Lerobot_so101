@@ -22,9 +22,13 @@ Everything runs end to end on real hardware: data collection → training → de
 **Task:** pick up a plush toy from one of 5 marked spots and put it in a cardboard box.
 **Dataset:** 50 demonstrations, [`Yufeng1216/so101_pick_place`](https://huggingface.co/datasets/Yufeng1216/so101_pick_place).
 
-| ACT · spot ⑤ | Diffusion Policy · spot ② | SmolVLA · spot ③ | VLM agent · spot ⑤ |
-|---|---|---|---|
-| ![ACT rollout](assets/act_success.gif) | ![Diffusion Policy rollout](assets/diffusion_success.gif) | ![SmolVLA rollout](assets/smolvla_success.gif) | ![VLM agent rollout](assets/vlm_agent_success.gif) |
+| ACT · spot ⑤ | Diffusion Policy · spot ② | SmolVLA · spot ③ |
+|---|---|---|
+| ![ACT rollout](assets/act_success.gif) | ![Diffusion Policy rollout](assets/diffusion_success.gif) | ![SmolVLA rollout](assets/smolvla_success.gif) |
+
+| π₀.₅ · spot ④ | VLM agent (Claude Haiku 5.5) · spot ⑤ |
+|---|---|
+| ![π₀.₅ rollout](assets/pi05_success.gif) | ![VLM agent rollout](assets/vlm_agent_success.gif) |
 
 <sub>Autonomous rollouts recorded during evaluation, 2× speed. Left of each clip: overhead camera; right: wrist camera.
 VLM agent: a separate demo run after the evaluation (same frozen agent), 3× speed, with the still pauses while the model thinks cut short; the whole attempt took 122 s.</sub>
@@ -59,6 +63,8 @@ VLM agent: a separate demo run after the evaluation (same frozen agent), 3× spe
 Diffusion and SmolVLA are each better than ACT (Fisher's exact test p = 0.025 and 0.013); they are not distinguishable from each other (p = 1.0).
 π₀.₅ is better than ACT (p < 0.0001) and Diffusion (p = 0.041); vs. SmolVLA p = 0.069. π₀.₅ ran on a cloud GPU through remote inference ([docs/07](docs/07_pi05.md)).
 The VLM agent is better than ACT (p = 0.002) and not distinguishable from Diffusion, SmolVLA or π₀.₅ (p = 0.47, 0.63, 0.27).</sub>
+
+![Per-spot success of all five policies](assets/results.svg)
 
 **In short**
 

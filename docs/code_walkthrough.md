@@ -1027,7 +1027,13 @@ messages.append({"role": "user", "content": results})
 - Stops on `done`, a response without tool calls (or `stop_reason == "refusal"`), or `--max-actions` (25).
 - `record.json` is rewritten after every action (each call, its result, the model's verdict, tokens, cost at $0.10 / $0.50 per M), so a run stopped with Ctrl+C still leaves its log.
 - After each attempt `go_home`: straight up to 15 cm (clears the box walls), then joint interpolation home; also in `finally`, so Ctrl+C never drops the arm mid-air.
-- The API key is read by the SDK from `ANTHROPIC_API_KEY`; the code never handles it.
+- The API key is read by the SDK from `ANTHROPIC_API_KEY`; the code never handles it. `anthropic.Anthropic(max_retries=8)`: a dropped connection is retried with backoff
+  (the SDK default of 2 once let a connection reset end a trial); this changes nothing in what the model sees.
+
+**Running an evaluation (`main`).** Trial numbers continue from the `trial_*/record.json` already in the output folder, so 8 runs of `--trials 5` make trials 1–40,
+and the spot follows the number (①..⑤). Between trials a 25 s countdown (`--reset-time`) replaces a key press.
+`--video` starts a thread that reads both cameras at 30 fps and writes them side by side to an MP4 (`cv2.VideoWriter`); while it runs, `images()` takes its newest frames
+under a `threading.Lock` instead of reading the cameras itself, because two threads must not read the same `VideoCapture`.
 
 ---
 

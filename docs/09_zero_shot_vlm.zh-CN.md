@@ -2,7 +2,7 @@
 
 [English](09_zero_shot_vlm.md) · **简体中文**
 
-PS：状态：标定、夹爪测量和智能体都已完成；prompt 和所有设置已冻结（提交打了标签 `vlm-agent-frozen`），正在做 40 次评估。
+PS：状态：已完成。用冻结的智能体（标签 `vlm-agent-frozen`）做了 40 次真机评估：**29/40**，见 §5 和 [results/vlm_agent.zh-CN.md](../results/vlm_agent.zh-CN.md)。
 
 ## 1. 为什么要做这组实验
 
@@ -176,10 +176,25 @@ python -m zero_shot.measure_gripper                                  # 开度 0.
 python -m zero_shot.agent --dry-run --frame data/Yufeng1216/rollout_eval_pi05:0   # 不连机械臂：用录好的画面，动作只规划不执行
 python -m zero_shot.agent --trials 1 --step                          # 真机，每个动作前按回车
 python -m zero_shot.agent --trials 5 --name vlm_agent                # 一组 5 次（共 8 组）；编号自动接续
+python -m zero_shot.agent --trials 1 --name vlm_agent_demo --video   # 跑一次，同时按 30 fps 录两路相机（做 README 的 GIF 用）
 ```
 
 `fit_touch_calib.py` 需要在触碰数据旁边放一个 `pairs.json`（第几次触碰 → `clean.jpg` 里那块胶带的像素）。每次尝试都会把每一步的图像和一个 `record.json`
 （每个动作、模型自己的判断、用时、token、费用）存到 `outputs/zero_shot/<名字>/` 下。
+两次尝试之间有 25 秒倒计时，用来把玩偶放到下一个点位（`--reset-time`），和 `robot.ps1 eval` 的复位时间一样，不用按键。
 
 PS：关于协议：智能体每个动作都要调一次 API，一次尝试大约 1–3 分钟，比训练出来的策略的 30 秒上限长得多。
 所以它的上限改成 **25 次模型调用**（一次调用里可以有好几个工具调用，比如先移动再闭合），而不是 30 秒，同时记录用时；这是它和 [08_evaluation.zh-CN.md](08_evaluation.zh-CN.md) 唯一不同的地方。
+
+## 5. 结果
+
+**29/40**（72.5%，95% 区间 57–84%）；3 次抓起没放进，8 次没抓起。各点位 ① 7 · ② 6 · ③ 7 · ④ 4 · ⑤ 5（满分 8）。完整记录：[results/vlm_agent.zh-CN.md](../results/vlm_agent.zh-CN.md)；
+每一步的图像和决定：[`Yufeng1216/vlm_agent_eval_logs`](https://huggingface.co/datasets/Yufeng1216/vlm_agent_eval_logs)。
+
+- **除了 ACT，和训练过的策略打平。** 好于 ACT（14/40，p = 0.002）；和 Diffusion（25/40）、SmolVLA（26/40）、π₀.₅（34/40）在每个 40 次的样本下分不出差别。
+- **慢。** 每次中位数 100 秒（45–252 秒）、11.5 次模型调用、$0.03；大部分时间是模型在思考、机械臂停着。训练出来的策略是 30 Hz 直接出动作。
+- **④ 最弱**，那里紧挨着箱壁：手指要么被箱壁挡住够不到，要么把玩偶推开，模型就一直重试。
+- **对自己很诚实。** 38 次调用了 `done`，其中 37 次自己的判断和实际结果一致；只有一次玩偶不在箱子里，它却报告成功；另外两次用完了调用次数。
+
+Limit：动作空间固定成夹爪竖直、手腕不转（§3.6），模型拿到的几何信息是手工量的（§3）。
+所以这里的"免训练"指的是不用机器人数据、不用任务示范，而不是"不需要工程"：标定、夹爪测量和安全层，才是让通用模型能用起来的东西。

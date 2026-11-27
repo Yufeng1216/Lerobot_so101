@@ -34,12 +34,14 @@
 | ACT | `.\scripts\robot.ps1 eval -Policy outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model -Name act -Episodes 5` |
 | Diffusion | `.\scripts\robot.ps1 eval -Policy outputs/train/diffusion_so101_pick_place/pretrained_model_ema -Name diffusion -Episodes 5 --policy.noise_scheduler_type=DDIM --policy.num_inference_steps=10` |
 | SmolVLA | `.\scripts\robot.ps1 eval -Policy outputs/train/smolvla_so101_pick_place/pretrained_model -Name smolvla -Episodes 5` |
+| π₀.₅ | `.\scripts\robot.ps1 eval -Policy outputs/train/pi05_so101_pick_place/pretrained_model -Name pi05 -Remote -Episodes 5`（服务端在云端 GPU 上，[docs/07](07_pi05.zh-CN.md) §8） |
+| VLM 智能体 | `python -m zero_shot.agent --trials 5 --name vlm_agent`（用它自己的脚本，[docs/09](09_zero_shot_vlm.zh-CN.md) §4） |
 
 PS：同名的评估数据集已经存在时会自动接着录，不会覆盖。所以一个策略运行 8 次同一条命令就是 40 次。
 
 - 背后是 `lerobot-rollout --strategy.type=episodic`：策略控制从臂做一次试验，然后进入复位阶段，这时用**主臂**把从臂带回起始姿态、把玩具放到下一个点。
 - 按键：→ 提前结束这次试验或复位；← 作废这次、重做；Esc 停止。
-- 录下的数据集叫 `Yufeng1216/rollout_eval_<策略名>`，存在 `data/` 里，不上传。LeRobot 规定 rollout 录的数据集名字必须以 `rollout_` 开头。
+- 录下的数据集叫 `Yufeng1216/rollout_eval_<策略名>`，存在 `data/` 里；评估结束后上传到了 Hub（链接在 `results/` 里）。LeRobot 规定 rollout 录的数据集名字必须以 `rollout_` 开头。
 - 主臂和从臂都要通电（12V 电源），不然会报 `Missing motor IDs`。
 
 ## 3. 判定标准和统计

@@ -34,12 +34,14 @@ Run it (every trial is recorded as an episode, kept as video):
 | ACT | `.\scripts\robot.ps1 eval -Policy outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model -Name act -Episodes 5` |
 | Diffusion | `.\scripts\robot.ps1 eval -Policy outputs/train/diffusion_so101_pick_place/pretrained_model_ema -Name diffusion -Episodes 5 --policy.noise_scheduler_type=DDIM --policy.num_inference_steps=10` |
 | SmolVLA | `.\scripts\robot.ps1 eval -Policy outputs/train/smolvla_so101_pick_place/pretrained_model -Name smolvla -Episodes 5` |
+| π₀.₅ | `.\scripts\robot.ps1 eval -Policy outputs/train/pi05_so101_pick_place/pretrained_model -Name pi05 -Remote -Episodes 5` (server on a cloud GPU, [docs/07](07_pi05.md) §8) |
+| VLM agent | `python -m zero_shot.agent --trials 5 --name vlm_agent` (its own script, [docs/09](09_zero_shot_vlm.md) §4) |
 
 PS: if the evaluation dataset of that name already exists, recording continues in it instead of overwriting. So running the same command 8 times gives 40 trials.
 
 - Under the hood it's `lerobot-rollout --strategy.type=episodic`: the policy drives the follower for one trial, then a reset phase follows in which you bring the follower back to the start pose with the **leader** and put the toy on the next spot.
 - Keys: → end this trial or the reset early; ← discard this trial and redo it; Esc stop.
-- The recording is the dataset `Yufeng1216/rollout_eval_<policy name>` in `data/`, not uploaded. LeRobot requires rollout datasets to start with `rollout_`.
+- The recording is the dataset `Yufeng1216/rollout_eval_<policy name>` in `data/`; after the evaluation it was uploaded to the Hub (links in `results/`). LeRobot requires rollout datasets to start with `rollout_`.
 - Both arms need power (12 V supply), otherwise you get `Missing motor IDs`.
 
 ## 3. Criteria and statistics

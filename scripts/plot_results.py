@@ -16,8 +16,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SPOTS = "①②③④⑤"
-ORDER = ["act", "diffusion", "smolvla", "pi05", "zero_shot"]  # README order; missing ones are skipped
-NAMES = {"act": "ACT", "diffusion": "Diffusion Policy", "smolvla": "SmolVLA", "pi05": "π₀.₅", "zero_shot": "Zero-shot VLM+IK"}
+ORDER = ["act", "diffusion", "smolvla", "pi05", "vlm_agent"]  # README order; missing ones are skipped
+NAMES = {"act": "ACT", "diffusion": "Diffusion Policy", "smolvla": "SmolVLA", "pi05": "π₀.₅", "vlm_agent": "VLM agent"}
 COLORS = ["#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B3"]
 ROW = re.compile(r"^\|\s*\d+\s*\|\s*([①②③④⑤])\s*\|\s*(✅|🟡|❌)\s*\|")
 
@@ -40,7 +40,7 @@ def trials_label(sheets) -> str:
 
 def main() -> None:
     sheets = [(p, read_sheet(ROOT / "results" / f"{p}.md")) for p in ORDER if (ROOT / "results" / f"{p}.md").exists()]
-    W, H, left, top, bottom = 640, 310, 50, 62, 40
+    W, H, left, top, bottom = 760, 310, 50, 62, 40
     plot_h = H - top - bottom
     group_w = (W - left - 20) / len(SPOTS)
     bar_w = min(28, (group_w - 16) / max(len(sheets), 1))
@@ -63,11 +63,13 @@ def main() -> None:
             svg.append(f'<rect x="{x:.1f}" y="{top + plot_h - h:.1f}" width="{bar_w - 2:.1f}" height="{h:.1f}" fill="{COLORS[k]}"/>')
             svg.append(f'<text x="{x + bar_w / 2 - 1:.1f}" y="{top + plot_h - h - 3:.1f}" text-anchor="middle" font-size="10" fill="#333">{sum(trials)}/{len(trials)}</text>')
         svg.append(f'<text x="{gx + group_w / 2:.1f}" y="{H - bottom + 18}" text-anchor="middle" font-size="14">{spot}</text>')
+    x, y = left, 40
     for k, (name, sheet) in enumerate(sheets):  # legend row under the title: name + overall rate
         allt = [t for v in sheet.values() for t in v]
-        x, y = left + k * 190, 40
+        label = f"{NAMES[name]} ({sum(allt)}/{len(allt)})"
         svg.append(f'<rect x="{x}" y="{y - 9}" width="10" height="10" fill="{COLORS[k]}"/>')
-        svg.append(f'<text x="{x + 14}" y="{y}">{NAMES[name]} ({sum(allt)}/{len(allt)})</text>')
+        svg.append(f'<text x="{x + 14}" y="{y}">{label}</text>')
+        x += 14 + 6.8 * len(label) + 18          # ~6.8 px per character at font-size 12
     svg.append("</svg>")
     out = ROOT / "assets" / "results.svg"
     out.parent.mkdir(exist_ok=True)

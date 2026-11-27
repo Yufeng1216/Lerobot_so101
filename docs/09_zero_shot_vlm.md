@@ -2,7 +2,7 @@
 
 **English** · [简体中文](09_zero_shot_vlm.zh-CN.md)
 
-PS: status: calibration, gripper measurement and the agent are done; prompt and settings are frozen (commit tagged `vlm-agent-frozen`), the 40 trials are running.
+PS: status: done. 40 real-robot trials with the frozen agent (tag `vlm-agent-frozen`): **29/40**, see §5 and [results/vlm_agent.md](../results/vlm_agent.md).
 
 ## 1. Why this experiment
 
@@ -177,10 +177,25 @@ python -m zero_shot.measure_gripper                                  # fingertip
 python -m zero_shot.agent --dry-run --frame data/Yufeng1216/rollout_eval_pi05:0   # no robot: recorded frame, moves only planned
 python -m zero_shot.agent --trials 1 --step                          # real arm, Enter before every motion
 python -m zero_shot.agent --trials 5 --name vlm_agent                # one evaluation block of 5 (×8); trial numbers continue
+python -m zero_shot.agent --trials 1 --name vlm_agent_demo --video   # one attempt, both cameras also recorded at 30 fps (for the README GIF)
 ```
 
 `fit_touch_calib.py` needs a `pairs.json` next to the touches (touch number → pixel of its square in `clean.jpg`). Every attempt logs each step's images and a `record.json`
 (every action, the model's own verdict, time, tokens, cost) under `outputs/zero_shot/<name>/`.
+Between trials there is a 25 s countdown to put the toy on the next spot (`--reset-time`), the same reset time as `robot.ps1 eval`; no key press needed.
 
 PS: protocol: the agent calls the API once per action, so one attempt takes about 1–3 minutes, longer than the 30 s limit of the trained policies.
 Its limit is therefore **25 model calls** (a call may contain several tool calls, e.g. move then close) instead of 30 seconds, and the time is recorded; this is the one place it differs from [08_evaluation.md](08_evaluation.md).
+
+## 5. Results
+
+**29/40** (72.5%, 95% CI 57–84%); 3 grasped but not placed, 8 not grasped. Per spot ① 7 · ② 6 · ③ 7 · ④ 4 · ⑤ 5 out of 8. Full sheet: [results/vlm_agent.md](../results/vlm_agent.md);
+every step's images and decisions: [`Yufeng1216/vlm_agent_eval_logs`](https://huggingface.co/datasets/Yufeng1216/vlm_agent_eval_logs).
+
+- **Level with the trained policies, except ACT.** Better than ACT (14/40, p = 0.002); not distinguishable from Diffusion (25/40), SmolVLA (26/40) or π₀.₅ (34/40) at 40 trials each.
+- **Slow.** Median 100 s per trial (45–252 s), 11.5 model calls, $0.03; most of the time is the model thinking while the arm stands still. A learned policy acts at 30 Hz.
+- **Weakest at ④**, next to the box wall: there the fingers stop short against the wall or push the toy away, and the model keeps retrying.
+- **Honest about itself.** In 38 trials it called `done`; its verdict matched the outcome in 37. Once it reported success with the toy outside the box; twice it ran out of calls.
+
+Limit: the action space is fixed to a vertical gripper with a fixed wrist roll (§3.6), and the model gets geometry measured by hand (§3).
+So "training-free" here means no robot data and no task demos, not "no engineering": the calibration, the gripper measurement and the safety layer are what make the general model usable.

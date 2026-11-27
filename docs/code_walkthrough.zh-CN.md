@@ -1029,7 +1029,13 @@ messages.append({"role": "user", "content": results})
 - 遇到 `done`、回复里没有工具调用（或者 `stop_reason == "refusal"`），或者到了 `--max-actions`（25）就停。
 - 每做一个动作就重写一次 `record.json`（每次调用、结果、模型自己的判断、token、按每百万 $0.10 / $0.50 算的费用），按 Ctrl+C 中断也能留下日志。
 - 每次尝试结束后 `go_home`：先垂直抬到 15 cm（越过箱壁），再在关节空间插值回家；`finally` 里也会执行，所以按 Ctrl+C 机械臂也不会在半空中掉下来。
-- API 密钥由 SDK 自己从 `ANTHROPIC_API_KEY` 读，代码从不经手。
+- API 密钥由 SDK 自己从 `ANTHROPIC_API_KEY` 读，代码从不经手。`anthropic.Anthropic(max_retries=8)`：连接断了会带退避地重试
+  （SDK 默认只重试 2 次，有一次连接被重置就让一次尝试中断了）；模型看到的内容不受影响。
+
+**跑评估（`main`）**：编号从输出文件夹里已有的 `trial_*/record.json` 接着往下排，所以跑 8 次 `--trials 5` 就是第 1–40 次，
+点位跟着编号走（①..⑤）。两次之间用 25 秒倒计时（`--reset-time`）代替按键。
+`--video` 会开一个线程，按 30 fps 读两路相机、左右拼起来写进 MP4（`cv2.VideoWriter`）；这时 `images()` 在 `threading.Lock` 保护下取它最新的帧，
+而不是自己去读相机，因为两个线程不能同时读同一个 `VideoCapture`。
 
 ---
 
