@@ -104,7 +104,8 @@ assets/          本页用的 GIF
 - **查硬件**：`python scripts/find_hardware.py`、`python scripts/scan_motors.py --port COM3`（[docs/01](docs/01_hardware.zh-CN.md)）。
 - **录数据**：`.\scripts\robot.ps1 record -Name so101_pick_place -Episodes 10`（[docs/03](docs/03_data_collection.zh-CN.md)）。
 - **训练**：笔记本上 `.\scripts\train.ps1 act`，集群上 `bash cloud/slurm/submit.sh diffusion`（[docs/04](docs/04_act.zh-CN.md)–[07](docs/07_pi05.zh-CN.md)）。
-- **评估**：`.\scripts\robot.ps1 eval -Policy <模型目录> -Name <策略名> -Episodes 5`，每个策略跑 8 次（[docs/08](docs/08_evaluation.zh-CN.md)）。
+- **评估**：`.\scripts\robot.ps1 eval -Policy <模型目录> -Name <策略名> -Episodes 5`，每个策略跑 8 次（[docs/08](docs/08_evaluation.zh-CN.md)）；
+  π₀.₅ 加 `-Remote`，服务端在云端 GPU 上（[docs/07](docs/07_pi05.zh-CN.md) §8），VLM 智能体用 `python -m zero_shot.agent --trials 5 --name vlm_agent`（[docs/09](docs/09_zero_shot_vlm.zh-CN.md)）。
 
 ## 教程
 

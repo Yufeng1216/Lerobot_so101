@@ -1,4 +1,4 @@
-# Remote training
+# Remote training and inference
 
 **English** · [简体中文](README.zh-CN.md)
 
@@ -58,6 +58,7 @@ from the Windows laptop, using LeRobot's built-in `--job.target=<hardware>`.
 python cloud/hf_jobs/train_pi05.py --dry-run                     # print the job config, submit nothing
 python cloud/hf_jobs/train_pi05.py --steps 200 --timeout 40m     # speed / memory test
 python cloud/hf_jobs/train_pi05.py --steps 3000 --timeout 9h     # the run used here
+python cloud/hf_jobs/serve_pi05.py --timeout 4h                  # evaluation: π₀.₅ policy server on an a10g-large, prints the SSH tunnel
 ```
 
 Before the first run:
@@ -73,9 +74,9 @@ time spent queuing for a GPU.
 On Windows, LeRobot writes the model id into the job config as `lerobot\pi05_base`; the script restores the
 forward slash before the config is uploaded, otherwise the Linux job cannot find the model.
 
-The 3,000-step run finished in 7 h 6 min (≈ $18), final loss 0.008; the model is pushed to the private repo
-the job created. Training curve, download command and the deployment plan (the model does not fit the laptop
-GPU, so inference runs on a rented GPU through `lerobot-policy-server`) are in [docs/07_pi05.md](../docs/07_pi05.md).
+The 3,000-step run finished in 7 h 6 min (≈ $18), final loss 0.008; the model was pushed to the repo the job created, later renamed and made public as
+[`Yufeng1216/pi05_so101_pick_place`](https://huggingface.co/Yufeng1216/pi05_so101_pick_place). Training curve, download command and the deployment plan (the model does not fit the laptop
+GPU, so for the evaluation `serve_pi05.py` runs `lerobot-policy-server` on an HF Jobs A10G, reached through an SSH tunnel) are in [docs/07_pi05.md](../docs/07_pi05.md).
 
 `hf jobs ps` / `hf jobs logs` print characters the Windows GBK console cannot encode; set `PYTHONUTF8=1` first
 (`scripts/env.ps1` does).

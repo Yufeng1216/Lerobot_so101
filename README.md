@@ -105,7 +105,8 @@ assets/          GIFs for this page
 - **Check the hardware**: `python scripts/find_hardware.py` and `python scripts/scan_motors.py --port COM3` ([docs/01](docs/01_hardware.md)).
 - **Record**: `.\scripts\robot.ps1 record -Name so101_pick_place -Episodes 10` ([docs/03](docs/03_data_collection.md)).
 - **Train**: `.\scripts\train.ps1 act` on the laptop, or `bash cloud/slurm/submit.sh diffusion` on a cluster ([docs/04](docs/04_act.md)–[07](docs/07_pi05.md)).
-- **Evaluate**: `.\scripts\robot.ps1 eval -Policy <model dir> -Name <policy> -Episodes 5`, eight times per policy ([docs/08](docs/08_evaluation.md)).
+- **Evaluate**: `.\scripts\robot.ps1 eval -Policy <model dir> -Name <policy> -Episodes 5`, eight times per policy ([docs/08](docs/08_evaluation.md));
+  π₀.₅ adds `-Remote` with its server on a cloud GPU ([docs/07](docs/07_pi05.md) §8), the VLM agent runs `python -m zero_shot.agent --trials 5 --name vlm_agent` ([docs/09](docs/09_zero_shot_vlm.md)).
 
 ## Tutorial
 

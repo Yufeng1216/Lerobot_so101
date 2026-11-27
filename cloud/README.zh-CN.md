@@ -1,4 +1,4 @@
-# 远程训练
+# 远程训练和推理
 
 [English](README.md) · **简体中文**
 
@@ -56,6 +56,7 @@ Linux 环境的几处处理（脚本里都做好了）：
 python cloud/hf_jobs/train_pi05.py --dry-run                     # 只打印任务配置，不提交
 python cloud/hf_jobs/train_pi05.py --steps 200 --timeout 40m     # 测速度和显存
 python cloud/hf_jobs/train_pi05.py --steps 3000 --timeout 9h     # 正式训练
+python cloud/hf_jobs/serve_pi05.py --timeout 4h                  # 评估：在 a10g-large 上起 π₀.₅ 推理服务端，打印 SSH 隧道命令
 ```
 
 第一次之前要准备：
@@ -68,7 +69,7 @@ python cloud/hf_jobs/train_pi05.py --steps 3000 --timeout 9h     # 正式训练
 
 PS：在 Windows 上，LeRobot 会把模型 id 写成 `lerobot\pi05_base` 放进任务配置；脚本在上传配置前把它改回斜杠，不然 Linux 上的任务找不到模型。
 
-3000 步用了 7 小时 6 分（约 $18），最终 loss 0.008，模型推到了任务创建的私有仓库。训练曲线、下载命令和部署方案
-（笔记本显存放不下，推理要通过 `lerobot-policy-server` 放到租的 GPU 上）见 [docs/07_pi05.zh-CN.md](../docs/07_pi05.zh-CN.md)。
+3000 步用了 7 小时 6 分（约 $18），最终 loss 0.008，模型推到了任务创建的仓库，后来改名并公开为 [`Yufeng1216/pi05_so101_pick_place`](https://huggingface.co/Yufeng1216/pi05_so101_pick_place)。训练曲线、下载命令和部署方案
+（笔记本显存放不下，评估时用 `serve_pi05.py` 在 HF Jobs 的 A10G 上跑 `lerobot-policy-server`，通过 SSH 隧道连过去）见 [docs/07_pi05.zh-CN.md](../docs/07_pi05.zh-CN.md)。
 
 PS：`hf jobs ps` / `hf jobs logs` 会输出 Windows GBK 终端编码不了的字符，先设 `PYTHONUTF8=1`（`scripts/env.ps1` 已经设了）。

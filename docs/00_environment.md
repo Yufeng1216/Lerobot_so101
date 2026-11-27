@@ -56,6 +56,21 @@ pip install "lerobot[core-scripts,training,feetech,smolvla,pi,diffusion]==0.7.0"
 
 PS: the version is pinned to `==0.7.0` for reproducibility. LeRobot moves fast, and CLI flags change even between minor versions.
 
+Two extras, only for the last two baselines:
+
+```powershell
+pip install "lerobot[remote]==0.7.0"   # π₀.₅ evaluation: remote inference client (Zenoh), docs/07 §8
+pip install anthropic                   # VLM agent: the official Anthropic SDK, docs/09
+```
+
+The VLM agent also needs an Anthropic API key as a user environment variable. Pasted at the prompt, it is not echoed and stays out of the command history:
+
+```powershell
+$s = Read-Host "API key" -AsSecureString; [Environment]::SetEnvironmentVariable("ANTHROPIC_API_KEY", [Net.NetworkCredential]::new("", $s).Password, "User")
+```
+
+Open a new terminal afterwards so it picks the variable up. The key never goes into the repo.
+
 ## 4. Check
 
 ```powershell

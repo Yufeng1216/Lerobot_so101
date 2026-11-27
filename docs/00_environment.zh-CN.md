@@ -53,6 +53,21 @@ pip install "lerobot[core-scripts,training,feetech,smolvla,pi,diffusion]==0.7.0"
 
 PS：版本固定成 `==0.7.0` 是为了可复现。LeRobot 更新很快，小版本之间命令行参数都会变。
 
+另外两个包，只有最后两个基线要用：
+
+```powershell
+pip install "lerobot[remote]==0.7.0"   # π₀.₅ 评估：远程推理的客户端（Zenoh），docs/07 §8
+pip install anthropic                   # VLM 智能体：官方的 Anthropic SDK，docs/09
+```
+
+VLM 智能体还需要把 Anthropic API 密钥设成用户环境变量。在提示后粘贴，屏幕上不显示，也不会留在命令历史里：
+
+```powershell
+$s = Read-Host "API key" -AsSecureString; [Environment]::SetEnvironmentVariable("ANTHROPIC_API_KEY", [Net.NetworkCredential]::new("", $s).Password, "User")
+```
+
+设完要开一个新终端才能读到。密钥永远不进仓库。
+
 ## 4. 验证
 
 ```powershell
