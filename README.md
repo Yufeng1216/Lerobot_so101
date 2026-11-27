@@ -22,11 +22,12 @@ Everything runs end to end on real hardware: data collection → training → de
 **Task:** pick up a plush toy from one of 5 marked spots and put it in a cardboard box.
 **Dataset:** 50 demonstrations, [`Yufeng1216/so101_pick_place`](https://huggingface.co/datasets/Yufeng1216/so101_pick_place).
 
-| ACT · spot ⑤ | Diffusion Policy · spot ② | SmolVLA · spot ③ |
-|---|---|---|
-| ![ACT rollout](assets/act_success.gif) | ![Diffusion Policy rollout](assets/diffusion_success.gif) | ![SmolVLA rollout](assets/smolvla_success.gif) |
+| ACT · spot ⑤ | Diffusion Policy · spot ② | SmolVLA · spot ③ | VLM agent · spot ② |
+|---|---|---|---|
+| ![ACT rollout](assets/act_success.gif) | ![Diffusion Policy rollout](assets/diffusion_success.gif) | ![SmolVLA rollout](assets/smolvla_success.gif) | ![VLM agent rollout](assets/vlm_agent_success.gif) |
 
-<sub>Autonomous rollouts recorded during evaluation, 2× speed. Left of each clip: overhead camera; right: wrist camera.</sub>
+<sub>Autonomous rollouts recorded during evaluation, 2× speed. Left of each clip: overhead camera; right: wrist camera.
+VLM agent: a separate demo run after the evaluation (same frozen agent), 3× speed, with the still pauses while the model thinks cut short.</sub>
 
 ## How it works
 
