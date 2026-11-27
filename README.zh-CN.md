@@ -52,14 +52,16 @@ VLM 智能体：评估结束后单独录的一次演示（同一个冻结的智�
 
 | 策略 | 成功 | 95% 区间 | 抓起没放进 | 没抓起 | 各点位 ①②③④⑤ | 成功用时 | 记录 · 录像 |
 |---|---|---|---|---|---|---|---|
-| ACT | **14/40**（35%） | 22–51% | 4 | 22 | 1 · 0 · 2 · 6 · 5 | 12 s | [act](results/act.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_act) |
-| Diffusion Policy | **25/40**（62.5%） | 47–76% | 7 | 8 | 6 · 6 · 4 · 7 · 2 | 15 s | [diffusion](results/diffusion.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_diffusion) |
-| SmolVLA | **26/40**（65%） | 50–78% | 0 | 14 | 2 · 3 · 7 · 7 · 7 | 14 s | [smolvla](results/smolvla.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_smolvla) |
-| π₀.₅ | **34/40**（85%） | 71–93% | 0 | 6 | 7 · 5 · 7 · 8 · 7 | 11 s | [pi05](results/pi05.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_pi05) |
-| VLM 智能体 + IK | **29/40**（72.5%） | 57–84% | 3 | 8 | 7 · 6 · 7 · 4 · 5 | 92 s | [vlm_agent](results/vlm_agent.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/vlm_agent_eval_logs) |
+| ACT | **14/40**（35%） | 22–51% | 4 | 22 | 1 · 0 · 2 · 6 · 5 | 12 s · RTX 3070 Laptop | [act](results/act.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_act) |
+| Diffusion Policy | **25/40**（62.5%） | 47–76% | 7 | 8 | 6 · 6 · 4 · 7 · 2 | 15 s · RTX 3070 Laptop | [diffusion](results/diffusion.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_diffusion) |
+| SmolVLA | **26/40**（65%） | 50–78% | 0 | 14 | 2 · 3 · 7 · 7 · 7 | 14 s · RTX 3070 Laptop | [smolvla](results/smolvla.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_smolvla) |
+| π₀.₅ | **34/40**（85%） | 71–93% | 0 | 6 | 7 · 5 · 7 · 8 · 7 | 11 s · A10G（远程） | [pi05](results/pi05.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_pi05) |
+| VLM 智能体 + IK | **29/40**（72.5%） | 57–84% | 3 | 8 | 7 · 6 · 7 · 4 · 5 | 92 s · Claude API | [vlm_agent](results/vlm_agent.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/vlm_agent_eval_logs) |
 
 <sub>成功 = 30 秒内玩具放进盒子并松开（VLM 智能体：25 次模型调用之内，见 [docs/09](docs/09_zero_shot_vlm.zh-CN.md)）。95% 区间：Wilson 区间。各点位：8 次里成功几次。成功用时：成功的那些次的中位数，从开始到松手的真实秒数
 （训练的策略：录到的帧数按控制循环的实际频率换算，另含操作者按键结束的反应时间；VLM 智能体：实际墙钟时间）。
+评估时各策略在哪里运行：ACT、Diffusion、SmolVLA 在笔记本的 RTX 3070 Laptop GPU（8 GB）上；π₀.₅ 通过远程推理在 HF Jobs 的 A10G（24 GB）上；
+VLM 智能体的模型在 Anthropic 的 API 上，IK 和安全检查在笔记本 CPU 上。下表的推理时间也是在同样的机器上测的。
 Diffusion 和 SmolVLA 都显著好于 ACT（Fisher 精确检验 p = 0.025 和 0.013），两者之间分不出差别（p = 1.0）。
 π₀.₅ 好于 ACT（p < 0.0001）和 Diffusion（p = 0.041）；和 SmolVLA 比 p = 0.069。π₀.₅ 在云端 GPU 上通过远程推理运行（[docs/07](docs/07_pi05.zh-CN.md)）。
 VLM 智能体好于 ACT（p = 0.002），和 Diffusion、SmolVLA、π₀.₅ 分不出差别（p = 0.47、0.63、0.27）。</sub>
@@ -68,11 +70,11 @@ VLM 智能体好于 ACT（p = 0.002），和 Diffusion、SmolVLA、π₀.₅ 分
 
 | 策略 | 步数 × batch | 看过的样本（epoch） | 训练时长 | 推理 | 模型 |
 |---|---|---|---|---|---|
-| ACT | 50k × 8 | 400k (≈27) | 4.0 h，RTX 3070 Laptop | ~47 ms | [🤗](https://huggingface.co/Yufeng1216/act_so101_pick_place) |
-| Diffusion Policy | 100k × 8 | 800k (≈53) | ≈4 h，V100 | ~200 ms（DDIM 10 步） | [🤗](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) |
+| ACT | 50k × 8 | 400k (≈27) | 4.0 h，RTX 3070 Laptop | ~47 ms，RTX 3070 Laptop | [🤗](https://huggingface.co/Yufeng1216/act_so101_pick_place) |
+| Diffusion Policy | 100k × 8 | 800k (≈53) | ≈4 h，V100 | ~200 ms（DDIM 10 步），RTX 3070 Laptop | [🤗](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) |
 | SmolVLA | 20k × 32 | 640k (≈43) | ≈14 h，V100 | ~0.38 s，RTX 3070 Laptop | [🤗](https://huggingface.co/Yufeng1216/smolvla_so101_pick_place) |
 | π₀.₅ | 3k × 32 | 96k (≈6) | 7.1 h，A100 80 GB（≈ $18） | ~0.45 s，A10G（HF Jobs，远程） | [🤗](https://huggingface.co/Yufeng1216/pi05_so101_pick_place) |
-| VLM 智能体 + IK | — | 不训练 | 不训练 | 每次决策 ~9 秒（Haiku API 调用 + 机械臂运动） | Claude Haiku 5.5（API） |
+| VLM 智能体 + IK | — | 不训练 | 不训练 | 每次决策 ~9 秒（Claude API 调用 + 机械臂运动） | Claude Haiku 5.5（API） |
 
 <sub>各行的步数不能直接比（batch、模型大小、有没有预训练都不同），所以列出看过的样本数和训练时长来对照预算。epoch 按 1.5 万帧的训练集计算。
 推理：训练的策略是一次前向算出一个动作块，按 30 Hz 执行；VLM 智能体每个动作调用一次模型，再等机械臂到位，每次调用中位数 8.9 秒。</sub>
