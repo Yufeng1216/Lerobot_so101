@@ -435,6 +435,7 @@ def main() -> None:
     ap.add_argument("--max-actions", type=int, default=25)
     ap.add_argument("--effort", default="medium", choices=["low", "medium", "high"])
     ap.add_argument("--step", action="store_true", help="real robot: press Enter before every motion")
+    ap.add_argument("--reset-time", type=int, default=25, help="seconds between trials to put the toy on the next spot")
     args = ap.parse_args()
 
     import anthropic
@@ -449,8 +450,13 @@ def main() -> None:
     try:
         for trial in range(first, first + args.trials):
             spot = "①②③④⑤"[(trial - 1) % 5]
-            if not args.dry_run:
-                input(f"\nTrial {trial}: put the toy on spot {spot}, then press Enter ")
+            if not args.dry_run and trial > first:
+                # reset phase like robot.ps1 eval (25 s): put the toy on the next spot, no key needed
+                for left in range(args.reset_time, 0, -1):
+                    print(f"\r  reset: put the toy on spot {spot} ... {left:2d} s ", end="", flush=True)
+                    time.sleep(1)
+                print()
+            print(f"\nTrial {trial}: spot {spot}")
             log_dir = out / f"trial_{trial:02d}_{datetime.now():%Y%m%d_%H%M%S}"
             log_dir.mkdir()
             rec = attempt(client, robot, "Start. The arm is in its folded home pose.", log_dir, args.max_actions, args.effort)
