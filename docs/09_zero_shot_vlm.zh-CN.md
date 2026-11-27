@@ -182,4 +182,4 @@ python -m zero_shot.agent --trials 5 --name vlm_agent                # 一组 5 
 （每个动作、模型自己的判断、用时、token、费用）存到 `outputs/zero_shot/<名字>/` 下。
 
 PS：关于协议：智能体每个动作都要调一次 API，一次尝试大约 1–3 分钟，比训练出来的策略的 30 秒上限长得多。
-所以它的上限改成 **25 个动作**，而不是 30 秒，同时记录用时；这是它和 [08_evaluation.zh-CN.md](08_evaluation.zh-CN.md) 唯一不同的地方。
+所以它的上限改成 **25 次模型调用**（一次调用里可以有好几个工具调用，比如先移动再闭合），而不是 30 秒，同时记录用时；这是它和 [08_evaluation.zh-CN.md](08_evaluation.zh-CN.md) 唯一不同的地方。

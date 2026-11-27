@@ -183,4 +183,4 @@ python -m zero_shot.agent --trials 5 --name vlm_agent                # one evalu
 (every action, the model's own verdict, time, tokens, cost) under `outputs/zero_shot/<name>/`.
 
 PS: protocol: the agent calls the API once per action, so one attempt takes about 1–3 minutes, longer than the 30 s limit of the trained policies.
-Its limit is therefore **25 actions** instead of 30 seconds, and the time is recorded; this is the one place it differs from [08_evaluation.md](08_evaluation.md).
+Its limit is therefore **25 model calls** (a call may contain several tool calls, e.g. move then close) instead of 30 seconds, and the time is recorded; this is the one place it differs from [08_evaluation.md](08_evaluation.md).
