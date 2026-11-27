@@ -5,7 +5,7 @@
 - 模型：`outputs/train/diffusion_so101_pick_place/pretrained_model_ema`（278M，100k 步，EMA 权重，[Hub](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place)）
 - 采样：DDIM 10 步（`--policy.noise_scheduler_type=DDIM --policy.num_inference_steps=10`），每次推理约 200 ms
 - 协议：[docs/08_evaluation.zh-CN.md](../docs/08_evaluation.zh-CN.md)：晚上只开台灯、拉窗帘（和录示范时一样）；5 个点 × 8 轮，每次最长 30 秒。第 1–10 次和 ACT 每 5 次交替测，第 11–40 次连续测
-- 录像：本地数据集 `Yufeng1216/rollout_eval_diffusion`（`data/` 下，40 条）
+- 录像：Hugging Face Hub 上的数据集 [`Yufeng1216/rollout_eval_diffusion`](https://huggingface.co/datasets/Yufeng1216/rollout_eval_diffusion)（40 条，两路相机；本地副本在 `data/` 下）
 - 结果：✅ 成功 / 🟡 部分成功（抓起没放进） / ❌ 失败（没抓起）
 - "时长"= 录到的帧数 / 30。控制循环实际约 25 Hz（每段动作生成时会停一下），真实用时约为表中数字 × 1.17
 

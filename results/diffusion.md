@@ -5,7 +5,7 @@
 - Model: `outputs/train/diffusion_so101_pick_place/pretrained_model_ema` (278M, 100k steps, EMA weights, [Hub](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place))
 - Sampling: 10-step DDIM (`--policy.noise_scheduler_type=DDIM --policy.num_inference_steps=10`), about 200 ms per inference
 - Protocol: [docs/08_evaluation.md](../docs/08_evaluation.md): night, desk lamp only, curtains closed (as when the demos were recorded); 5 spots × 8 rounds, at most 30 s per trial. Trials 1–10 alternated with ACT every 5 trials; trials 11–40 run in one go
-- Recording: local dataset `Yufeng1216/rollout_eval_diffusion` (under `data/`, 40 episodes)
+- Recording: dataset [`Yufeng1216/rollout_eval_diffusion`](https://huggingface.co/datasets/Yufeng1216/rollout_eval_diffusion) on the Hugging Face Hub (40 episodes, both cameras; local copy under `data/`)
 - Result: ✅ success / 🟡 partial (grasped, not placed) / ❌ failure (not grasped)
 - "Time" = recorded frames / 30. The control loop actually runs at about 25 Hz (it pauses briefly while each action segment is generated), so real time ≈ the number × 1.17
 

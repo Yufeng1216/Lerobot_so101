@@ -45,12 +45,12 @@
 
 > **状态：** ACT、Diffusion Policy、SmolVLA、π₀.₅ 已测完；接下来是免训练的 VLM 智能体。
 
-| 策略 | 成功 | 95% 区间 | 抓起没放进 | 没抓起 | 各点位 ①②③④⑤ | 记录 |
+| 策略 | 成功 | 95% 区间 | 抓起没放进 | 没抓起 | 各点位 ①②③④⑤ | 记录 · 录像 |
 |---|---|---|---|---|---|---|
-| ACT | **14/40**（35%） | 22–51% | 4 | 22 | 1 · 0 · 2 · 6 · 5 | [act](results/act.zh-CN.md) |
-| Diffusion Policy | **25/40**（62.5%） | 47–76% | 7 | 8 | 6 · 6 · 4 · 7 · 2 | [diffusion](results/diffusion.zh-CN.md) |
-| SmolVLA | **26/40**（65%） | 50–78% | 0 | 14 | 2 · 3 · 7 · 7 · 7 | [smolvla](results/smolvla.zh-CN.md) |
-| π₀.₅ | **34/40**（85%） | 71–93% | 0 | 6 | 7 · 5 · 7 · 8 · 7 | [pi05](results/pi05.zh-CN.md) |
+| ACT | **14/40**（35%） | 22–51% | 4 | 22 | 1 · 0 · 2 · 6 · 5 | [act](results/act.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_act) |
+| Diffusion Policy | **25/40**（62.5%） | 47–76% | 7 | 8 | 6 · 6 · 4 · 7 · 2 | [diffusion](results/diffusion.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_diffusion) |
+| SmolVLA | **26/40**（65%） | 50–78% | 0 | 14 | 2 · 3 · 7 · 7 · 7 | [smolvla](results/smolvla.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_smolvla) |
+| π₀.₅ | **34/40**（85%） | 71–93% | 0 | 6 | 7 · 5 · 7 · 8 · 7 | [pi05](results/pi05.zh-CN.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_pi05) |
 | VLM 智能体 + IK | – | | | | | |
 
 <sub>成功 = 30 秒内玩具放进盒子并松开。95% 区间：Wilson 区间。各点位：8 次里成功几次。

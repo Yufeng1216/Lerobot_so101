@@ -5,7 +5,7 @@
 - Model: `outputs/train/smolvla_so101_pick_place/pretrained_model` (fine-tuned from `lerobot/smolvla_base`, 20k steps × batch 32)
 - Inference: 10 flow-matching steps, about 0.38 s per 50-step chunk on the laptop GPU; cameras renamed top → camera1, wrist → camera2 (`--rename_map`, added by `robot.ps1`)
 - Protocol: [docs/08_evaluation.md](../docs/08_evaluation.md): night, desk lamp only, curtains closed; 5 spots × 8 rounds, at most 30 s per trial, all 40 in one go
-- Recording: local dataset `Yufeng1216/rollout_eval_smolvla` (under `data/`, 40 episodes)
+- Recording: dataset [`Yufeng1216/rollout_eval_smolvla`](https://huggingface.co/datasets/Yufeng1216/rollout_eval_smolvla) on the Hugging Face Hub (40 episodes, both cameras; local copy under `data/`)
 - Result: ✅ success / 🟡 partial (grasped, not placed) / ❌ failure (not grasped)
 - "Time" = recorded frames / 30. The control loop runs at about 25 Hz, so a trial that runs the full 30 s shows about 24 s
 

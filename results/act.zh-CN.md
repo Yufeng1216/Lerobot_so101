@@ -4,7 +4,7 @@
 
 - 模型：`outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model`（50k 步，[Hub](https://huggingface.co/Yufeng1216/act_so101_pick_place)）
 - 协议：[docs/08_evaluation.zh-CN.md](../docs/08_evaluation.zh-CN.md)：晚上只开台灯、拉窗帘（和录示范时一样）；5 个点 × 8 轮，每次最长 30 秒。第 1–10 次和 Diffusion 每 5 次交替测，第 11–40 次连续测
-- 录像：本地数据集 `Yufeng1216/rollout_eval_act`（`data/` 下，40 条）
+- 录像：Hugging Face Hub 上的数据集 [`Yufeng1216/rollout_eval_act`](https://huggingface.co/datasets/Yufeng1216/rollout_eval_act)（40 条，两路相机；本地副本在 `data/` 下）
 - 结果：✅ 成功 / 🟡 部分成功（抓起没放进） / ❌ 失败（没抓起）
 - "时长"是这条 episode 录了多久：成功后按 → 提前结束，所以成功试验的时长 ≈ 完成用时
 

@@ -4,7 +4,7 @@
 
 - Model: `outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model` (50k steps, [Hub](https://huggingface.co/Yufeng1216/act_so101_pick_place))
 - Protocol: [docs/08_evaluation.md](../docs/08_evaluation.md): night, desk lamp only, curtains closed (as when the demos were recorded); 5 spots × 8 rounds, at most 30 s per trial. Trials 1–10 alternated with Diffusion every 5 trials; trials 11–40 run in one go
-- Recording: local dataset `Yufeng1216/rollout_eval_act` (under `data/`, 40 episodes)
+- Recording: dataset [`Yufeng1216/rollout_eval_act`](https://huggingface.co/datasets/Yufeng1216/rollout_eval_act) on the Hugging Face Hub (40 episodes, both cameras; local copy under `data/`)
 - Result: ✅ success / 🟡 partial (grasped, not placed) / ❌ failure (not grasped)
 - "Time" is how long the episode was recorded: after a success → ends it early, so for successes it ≈ the time to finish
 

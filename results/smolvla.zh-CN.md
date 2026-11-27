@@ -5,7 +5,7 @@
 - 模型：`outputs/train/smolvla_so101_pick_place/pretrained_model`（从 `lerobot/smolvla_base` 微调，2 万步 × batch 32）
 - 推理：flow matching 积分 10 步，笔记本 GPU 上每个 50 步动作块约 0.38 秒；相机改名 top → camera1、wrist → camera2（`--rename_map`，由 `robot.ps1` 自动加上）
 - 协议：[docs/08_evaluation.zh-CN.md](../docs/08_evaluation.zh-CN.md)：晚上只开台灯、拉窗帘；5 个点 × 8 轮，每次最长 30 秒，40 次连续测完
-- 录像：本地数据集 `Yufeng1216/rollout_eval_smolvla`（`data/` 下，40 条）
+- 录像：Hugging Face Hub 上的数据集 [`Yufeng1216/rollout_eval_smolvla`](https://huggingface.co/datasets/Yufeng1216/rollout_eval_smolvla)（40 条，两路相机；本地副本在 `data/` 下）
 - 结果：✅ 成功 / 🟡 部分成功（抓起没放进） / ❌ 失败（没抓起）
 - "时长"= 录到的帧数 / 30。控制循环实际约 25 Hz，所以跑满 30 秒的试验显示约 24 秒
 

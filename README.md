@@ -46,12 +46,12 @@ Everything runs end to end on real hardware: data collection → training → de
 
 > **Status:** ACT, Diffusion Policy, SmolVLA and π₀.₅ done; the training-free VLM agent is next.
 
-| Policy | Success | 95% CI | Grasped, not placed | Not grasped | Per spot ①②③④⑤ | Sheet |
+| Policy | Success | 95% CI | Grasped, not placed | Not grasped | Per spot ①②③④⑤ | Sheet · videos |
 |---|---|---|---|---|---|---|
-| ACT | **14/40** (35%) | 22–51% | 4 | 22 | 1 · 0 · 2 · 6 · 5 | [act](results/act.md) |
-| Diffusion Policy | **25/40** (62.5%) | 47–76% | 7 | 8 | 6 · 6 · 4 · 7 · 2 | [diffusion](results/diffusion.md) |
-| SmolVLA | **26/40** (65%) | 50–78% | 0 | 14 | 2 · 3 · 7 · 7 · 7 | [smolvla](results/smolvla.md) |
-| π₀.₅ | **34/40** (85%) | 71–93% | 0 | 6 | 7 · 5 · 7 · 8 · 7 | [pi05](results/pi05.md) |
+| ACT | **14/40** (35%) | 22–51% | 4 | 22 | 1 · 0 · 2 · 6 · 5 | [act](results/act.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_act) |
+| Diffusion Policy | **25/40** (62.5%) | 47–76% | 7 | 8 | 6 · 6 · 4 · 7 · 2 | [diffusion](results/diffusion.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_diffusion) |
+| SmolVLA | **26/40** (65%) | 50–78% | 0 | 14 | 2 · 3 · 7 · 7 · 7 | [smolvla](results/smolvla.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_smolvla) |
+| π₀.₅ | **34/40** (85%) | 71–93% | 0 | 6 | 7 · 5 · 7 · 8 · 7 | [pi05](results/pi05.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_pi05) |
 | VLM agent + IK | – | | | | | |
 
 <sub>Success = toy released inside the box within 30 s. 95% CI: Wilson score interval. Per spot: successes out of 8.
