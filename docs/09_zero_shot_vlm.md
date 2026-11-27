@@ -176,7 +176,7 @@ python zero_shot/fit_touch_calib.py outputs/zero_shot/calib_touch/<time>   # -> 
 python -m zero_shot.measure_gripper                                  # fingertip gap at 0..100 (§3.4)
 python -m zero_shot.agent --dry-run --frame data/Yufeng1216/rollout_eval_pi05:0   # no robot: recorded frame, moves only planned
 python -m zero_shot.agent --trials 1 --step                          # real arm, Enter before every motion
-python -m zero_shot.agent --trials 40 --name vlm_agent               # the evaluation: Enter per trial, then type the result (1/2/3)
+python -m zero_shot.agent --trials 5 --name vlm_agent                # one evaluation block of 5 (×8); trial numbers continue
 ```
 
 `fit_touch_calib.py` needs a `pairs.json` next to the touches (touch number → pixel of its square in `clean.jpg`). Every attempt logs each step's images and a `record.json`

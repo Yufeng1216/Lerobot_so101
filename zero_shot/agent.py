@@ -22,8 +22,8 @@ Usage (inside the `lerobot` conda env, from the repo root; needs ANTHROPIC_API_K
         no robot: images come from a recorded frame, moves are only planned (checks the plumbing)
     python -m zero_shot.agent --trials 1 --step                real robot, Enter before every motion
     python -m zero_shot.agent --trials 1                       real robot, one attempt
-    python -m zero_shot.agent --trials 40 --name vlm_agent     the evaluation: Enter per trial, then type the result
-        (stopped early? the same command continues from the next trial number)
+    python -m zero_shot.agent --trials 5 --name vlm_agent      one evaluation block (8 blocks = 40 trials, results noted by hand
+        like the other policies); each run continues from the next trial number
 """
 
 from __future__ import annotations
@@ -458,12 +458,7 @@ def main() -> None:
             (log_dir / "record.json").write_text(json.dumps(rec, indent=2, ensure_ascii=False), encoding="utf-8")
             if not args.dry_run:
                 go_home(robot)
-                # the person watching scores the trial, with the same codes as the other policies
-                while (res := input("  Result? 1 = in the box, 2 = grasped but not placed, 3 = not grasped: ").strip()) not in ("1", "2", "3"):
-                    pass
-                rec["result"] = int(res)
-                (log_dir / "record.json").write_text(json.dumps(rec, indent=2, ensure_ascii=False), encoding="utf-8")
-            print(f"Trial {trial} ({spot}): {rec['stop']}, claimed {rec['claimed']}, result {rec.get('result')}, "
+            print(f"Trial {trial} ({spot}): {rec['stop']}, claimed {rec['claimed']}, "
                   f"{len(rec['actions'])} actions, {rec['seconds']} s, ${rec['cost_usd']}")
     finally:
         if not args.dry_run:
