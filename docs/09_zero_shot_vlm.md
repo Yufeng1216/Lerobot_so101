@@ -2,7 +2,7 @@
 
 **English** · [简体中文](09_zero_shot_vlm.zh-CN.md)
 
-PS: status: calibration, gripper measurement and the agent are done and run on the real arm; the prompt is being debugged, then it gets frozen for the 40 trials.
+PS: status: calibration, gripper measurement and the agent are done; prompt and settings are frozen (commit tagged `vlm-agent-frozen`), the 40 trials are running.
 
 ## 1. Why this experiment
 
@@ -176,7 +176,7 @@ python zero_shot/fit_touch_calib.py outputs/zero_shot/calib_touch/<time>   # -> 
 python -m zero_shot.measure_gripper                                  # fingertip gap at 0..100 (§3.4)
 python -m zero_shot.agent --dry-run --frame data/Yufeng1216/rollout_eval_pi05:0   # no robot: recorded frame, moves only planned
 python -m zero_shot.agent --trials 1 --step                          # real arm, Enter before every motion
-python -m zero_shot.agent --trials 5 --name vlm_agent                # an evaluation block
+python -m zero_shot.agent --trials 40 --name vlm_agent               # the evaluation: Enter per trial, then type the result (1/2/3)
 ```
 
 `fit_touch_calib.py` needs a `pairs.json` next to the touches (touch number → pixel of its square in `clean.jpg`). Every attempt logs each step's images and a `record.json`

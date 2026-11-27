@@ -2,7 +2,7 @@
 
 [English](09_zero_shot_vlm.md) · **简体中文**
 
-PS：状态：标定、夹爪测量和智能体都已完成，已经在真机上跑过；现在在调 prompt，调好后冻结，再做 40 次评估。
+PS：状态：标定、夹爪测量和智能体都已完成；prompt 和所有设置已冻结（提交打了标签 `vlm-agent-frozen`），正在做 40 次评估。
 
 ## 1. 为什么要做这组实验
 
@@ -175,7 +175,7 @@ python zero_shot/fit_touch_calib.py outputs/zero_shot/calib_touch/<时间>   # -
 python -m zero_shot.measure_gripper                                  # 开度 0..100 时的指尖距离（§3.4）
 python -m zero_shot.agent --dry-run --frame data/Yufeng1216/rollout_eval_pi05:0   # 不连机械臂：用录好的画面，动作只规划不执行
 python -m zero_shot.agent --trials 1 --step                          # 真机，每个动作前按回车
-python -m zero_shot.agent --trials 5 --name vlm_agent                # 一组评估
+python -m zero_shot.agent --trials 40 --name vlm_agent               # 正式评估：每次按一下回车，结束后输入结果（1/2/3）
 ```
 
 `fit_touch_calib.py` 需要在触碰数据旁边放一个 `pairs.json`（第几次触碰 → `clean.jpg` 里那块胶带的像素）。每次尝试都会把每一步的图像和一个 `record.json`

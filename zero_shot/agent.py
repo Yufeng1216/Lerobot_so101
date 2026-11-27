@@ -22,7 +22,8 @@ Usage (inside the `lerobot` conda env, from the repo root; needs ANTHROPIC_API_K
         no robot: images come from a recorded frame, moves are only planned (checks the plumbing)
     python -m zero_shot.agent --trials 1 --step                real robot, Enter before every motion
     python -m zero_shot.agent --trials 1                       real robot, one attempt
-    python -m zero_shot.agent --trials 5 --name vlm_agent      evaluation block (logs to outputs/)
+    python -m zero_shot.agent --trials 40 --name vlm_agent     the evaluation: Enter per trial, then type the result
+        (stopped early? the same command continues from the next trial number)
 """
 
 from __future__ import annotations
@@ -441,20 +442,29 @@ def main() -> None:
     out = ROOT / "outputs" / "zero_shot" / args.name
     out.mkdir(parents=True, exist_ok=True)
     robot = Robot(args.dry_run, load_frame(args.frame) if args.dry_run else None, step=args.step)
+    # Trial numbers continue from what is already in this folder, so the 40 trials can be run in
+    # several sittings with the same command; the spot follows the number (①..⑤ repeating).
+    done_before = [json.loads(p.read_text(encoding="utf-8")).get("trial", 0) for p in out.glob("trial_*/record.json")]
+    first = max(done_before, default=0) + 1
     try:
-        for trial in range(1, args.trials + 1):
+        for trial in range(first, first + args.trials):
             spot = "①②③④⑤"[(trial - 1) % 5]
             if not args.dry_run:
                 input(f"\nTrial {trial}: put the toy on spot {spot}, then press Enter ")
-            log_dir = out / datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_dir = out / f"trial_{trial:02d}_{datetime.now():%Y%m%d_%H%M%S}"
             log_dir.mkdir()
             rec = attempt(client, robot, "Start. The arm is in its folded home pose.", log_dir, args.max_actions, args.effort)
-            if not args.dry_run:
-                go_home(robot)
             rec.update({"trial": trial, "spot": spot, "model": MODEL, "effort": args.effort, "dry_run": args.dry_run})
             (log_dir / "record.json").write_text(json.dumps(rec, indent=2, ensure_ascii=False), encoding="utf-8")
-            print(f"Trial {trial}: {rec['stop']}, claimed {rec['claimed']}, {len(rec['actions'])} actions, "
-                  f"{rec['seconds']} s, ${rec['cost_usd']}  -> {log_dir}")
+            if not args.dry_run:
+                go_home(robot)
+                # the person watching scores the trial, with the same codes as the other policies
+                while (res := input("  Result? 1 = in the box, 2 = grasped but not placed, 3 = not grasped: ").strip()) not in ("1", "2", "3"):
+                    pass
+                rec["result"] = int(res)
+                (log_dir / "record.json").write_text(json.dumps(rec, indent=2, ensure_ascii=False), encoding="utf-8")
+            print(f"Trial {trial} ({spot}): {rec['stop']}, claimed {rec['claimed']}, result {rec.get('result')}, "
+                  f"{len(rec['actions'])} actions, {rec['seconds']} s, ${rec['cost_usd']}")
     finally:
         if not args.dry_run:
             try:
