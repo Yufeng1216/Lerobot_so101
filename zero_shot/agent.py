@@ -158,8 +158,10 @@ class Robot:
     """The follower arm + both cameras. With dry_run, nothing is connected: images come from a
     recorded frame and the 'measured' joints are just the last command."""
 
-    def __init__(self, dry_run: bool, frame: tuple[np.ndarray, np.ndarray] | None = None, step: bool = False):
+    def __init__(self, dry_run: bool, frame: tuple[np.ndarray, np.ndarray] | None = None, step: bool = False,
+                 video: Path | None = None):
         self.dry = dry_run
+        self.video = None
         self.step = step                   # wait for Enter before every motion (first real runs)
         cfg = json.loads((ROOT / "config" / "robot.json").read_text(encoding="utf-8"))
         if dry_run:
@@ -180,6 +182,8 @@ class Robot:
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, c["height"])
                 self.caps[name] = cap
             self.q = self.read()
+            if video is not None:
+                self._start_video(video)
         self.home = self.q.copy()          # the pose the arm was in at start: folded, out of the way
 
     def read(self) -> np.ndarray:
@@ -188,9 +192,42 @@ class Robot:
         obs = self.robot.get_observation()
         return np.array([obs[f"{j}.pos"] for j in JOINTS])
 
+    def _start_video(self, path: Path) -> None:
+        """Demo recording (--video): one thread reads both cameras continuously and writes them side
+        by side to an MP4; images() then hands out its newest frames instead of reading the cameras
+        itself (two threads must not read the same VideoCapture)."""
+        import threading
+        self.video = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 30, (1280, 480))
+        self.latest = self._grab()
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+
+        def loop():
+            while not self._stop.is_set():
+                t = time.perf_counter()
+                frames = self._grab()
+                with self._lock:
+                    self.latest = frames
+                self.video.write(np.hstack(frames))
+                time.sleep(max(0.0, 1 / 30 - (time.perf_counter() - t)))
+
+        self._thread = threading.Thread(target=loop, daemon=True)
+        self._thread.start()
+
+    def _grab(self) -> tuple[np.ndarray, np.ndarray]:
+        out = []
+        for name in ("top", "wrist"):
+            ok, img = self.caps[name].read()
+            out.append(img if ok else np.zeros((480, 640, 3), np.uint8))
+        return tuple(out)
+
     def images(self) -> tuple[np.ndarray, np.ndarray]:
         if self.dry:
             return self.frame
+        if self.video is not None:
+            time.sleep(0.2)                  # a frame taken after the arm stopped
+            with self._lock:
+                return tuple(f.copy() for f in self.latest)
         out = []
         for name in ("top", "wrist"):
             for _ in range(4):               # drop buffered frames
@@ -225,6 +262,10 @@ class Robot:
             time.sleep(0.2)
 
     def close(self) -> None:
+        if self.video is not None:
+            self._stop.set()
+            self._thread.join()
+            self.video.release()
         if not self.dry:
             self.robot.disconnect()
             for cap in self.caps.values():
@@ -436,6 +477,7 @@ def main() -> None:
     ap.add_argument("--effort", default="medium", choices=["low", "medium", "high"])
     ap.add_argument("--step", action="store_true", help="real robot: press Enter before every motion")
     ap.add_argument("--reset-time", type=int, default=25, help="seconds between trials to put the toy on the next spot")
+    ap.add_argument("--video", action="store_true", help="also record both cameras at 30 fps to <name>/demo.mp4 (for a GIF)")
     args = ap.parse_args()
 
     import anthropic
@@ -444,7 +486,8 @@ def main() -> None:
     client = anthropic.Anthropic(max_retries=8)
     out = ROOT / "outputs" / "zero_shot" / args.name
     out.mkdir(parents=True, exist_ok=True)
-    robot = Robot(args.dry_run, load_frame(args.frame) if args.dry_run else None, step=args.step)
+    robot = Robot(args.dry_run, load_frame(args.frame) if args.dry_run else None, step=args.step,
+                  video=out / f"demo_{datetime.now():%Y%m%d_%H%M%S}.mp4" if args.video and not args.dry_run else None)
     # Trial numbers continue from what is already in this folder, so the 40 trials can be run in
     # several sittings with the same command; the spot follows the number (①..⑤ repeating).
     done_before = [json.loads(p.read_text(encoding="utf-8")).get("trial", 0) for p in out.glob("trial_*/record.json")]

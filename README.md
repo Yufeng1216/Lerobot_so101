@@ -44,7 +44,7 @@ Everything runs end to end on real hardware: data collection → training → de
 
 ## Results
 
-> **Status:** ACT, Diffusion Policy, SmolVLA and π₀.₅ done; the training-free VLM agent is next.
+> **Status:** all five evaluated, 40 real-robot trials each.
 
 | Policy | Success | 95% CI | Grasped, not placed | Not grasped | Per spot ①②③④⑤ | Sheet · videos |
 |---|---|---|---|---|---|---|
@@ -52,11 +52,19 @@ Everything runs end to end on real hardware: data collection → training → de
 | Diffusion Policy | **25/40** (62.5%) | 47–76% | 7 | 8 | 6 · 6 · 4 · 7 · 2 | [diffusion](results/diffusion.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_diffusion) |
 | SmolVLA | **26/40** (65%) | 50–78% | 0 | 14 | 2 · 3 · 7 · 7 · 7 | [smolvla](results/smolvla.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_smolvla) |
 | π₀.₅ | **34/40** (85%) | 71–93% | 0 | 6 | 7 · 5 · 7 · 8 · 7 | [pi05](results/pi05.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/rollout_eval_pi05) |
-| VLM agent + IK | – | | | | | |
+| VLM agent + IK | **29/40** (72.5%) | 57–84% | 3 | 8 | 7 · 6 · 7 · 4 · 5 | [vlm_agent](results/vlm_agent.md) · [🤗](https://huggingface.co/datasets/Yufeng1216/vlm_agent_eval_logs) |
 
-<sub>Success = toy released inside the box within 30 s. 95% CI: Wilson score interval. Per spot: successes out of 8.
+<sub>Success = toy released inside the box within 30 s (VLM agent: within 25 model calls, see [docs/09](docs/09_zero_shot_vlm.md)). 95% CI: Wilson score interval. Per spot: successes out of 8.
 Diffusion and SmolVLA are each better than ACT (Fisher's exact test p = 0.025 and 0.013); they are not distinguishable from each other (p = 1.0).
-π₀.₅ is better than ACT (p < 0.0001) and Diffusion (p = 0.041); vs. SmolVLA p = 0.069. π₀.₅ ran on a cloud GPU through remote inference ([docs/07](docs/07_pi05.md)).</sub>
+π₀.₅ is better than ACT (p < 0.0001) and Diffusion (p = 0.041); vs. SmolVLA p = 0.069. π₀.₅ ran on a cloud GPU through remote inference ([docs/07](docs/07_pi05.md)).
+The VLM agent is better than ACT (p = 0.002) and not distinguishable from Diffusion, SmolVLA or π₀.₅ (p = 0.47, 0.63, 0.27).</sub>
+
+**In short**
+
+- **Pretraining pays off.** The two pretrained VLAs never dropped a grasped toy, and π₀.₅ (4.1 B, full fine-tune) was the most reliable at 34/40; ACT, trained from scratch on the same 50 demos, managed 14/40.
+- **A general model with no robot training gets surprisingly far.** Claude Haiku 5.5, given only measured geometry and four tools, placed the toy 29 times out of 40, statistically level with the trained policies except ACT.
+- **But it is slow.** It thinks before every action: a median 100 s and about $0.03 per trial, against a learned policy acting at 30 Hz. It was weakest at spot ④, next to the box wall.
+- **Caveat:** 40 trials per policy give wide intervals; only the differences with ACT (and π₀.₅ vs. Diffusion) are significant.
 
 | Policy | Steps × batch | Samples seen (epochs) | Train time | Inference per chunk | Model |
 |---|---|---|---|---|---|
