@@ -20,6 +20,7 @@ Python / PowerShell syntax is explained the first time it appears (marked 📘).
 | 4 training | [`lerobot_train_win.py`](#8-scriptslerobot_train_winpy) | fixes the checkpoint-link problem on Windows |
 | 5 remote | [`cloud/slurm/*`](#10-cloudslurm-training-on-a-gpu-cluster) | environment setup and job submission on a Linux GPU cluster |
 | 5 remote | [`cloud/hf_jobs/train_pi05.py`](#13-cloudhf_jobstrain_pi05py) | submit π₀.₅ training to rented HF GPUs |
+| 6 evaluation | [`make_server_config.py`, `serve_pi05.py`](#15-remote-inference-make_server_configpy-and-cloudhf_jobsserve_pi05py) | run π₀.₅ on an HF Jobs GPU and drive the arm from the laptop |
 | 6 evaluation | [`make_gif.py`](#11-scriptsmake_gifpy) | cut an evaluation trial into a GIF for the README |
 | 6 evaluation | [`plot_results.py`](#12-scriptsplot_resultspy) | per-spot success bar chart from `results/*.md` |
 | 7 zero-shot | [`zero_shot/*`](#14-zero_shot-the-zero-shot-baseline) | kinematics, homography calibration, VLM pointing, real-robot grasp |
@@ -349,6 +350,7 @@ Details of `eval`:
 - Without `-Episodes` the default is 20, not record's 50: `$PSBoundParameters.ContainsKey("Episodes")` tells whether the user passed it explicitly.
 - `--dataset.push_to_hub=false`: evaluation videos stay local.
 - **Camera renaming for VLAs**: SmolVLA and π₀.₅ were fine-tuned with `--rename_map` (top → camera1, ...), and the mapping is stored in the model's `policy_preprocessor.json`. But `lerobot-rollout` checks camera names *before* the preprocessor runs and only skips that check when `--rename_map` is given. So `eval` reads the `rename_observations_processor` step from that file and passes the same mapping on; for ACT and Diffusion there is none and nothing is added. The inner quotes are written as `\"` for the PowerShell 5.1 reason explained in §7.
+- **`-Remote`** (π₀.₅, which doesn't fit the laptop GPU): instead of `--policy.path`, pass `--inference.type=remote` with the deployment name (the policy `type` from the local `config.json`) and the semantics string that `make_server_config.py` writes, so client and server agree; images go as JPEG. `--inference.refill_seconds=1.0` asks for the next chunk 1 s before the current one runs out (default 0.5 s), so a cloud round trip of up to about 1 s doesn't make the arm pause. The camera mapping is still read from the local checkpoint, because the server drops its own rename step. See §15.
 - **Automatic append**: if an evaluation dataset of that name exists (has `meta\info.json`), `--resume=true --dataset.root=...` are added.
   So one policy can be tested in several runs (`-Episodes 5` each) without remembering `-Resume`. Unlike `record`: there a name clash is usually a mistake and needs an explicit `-Resume`;
   for evaluation the same name means "the same experiment".
@@ -1000,3 +1002,55 @@ also save overhead + wrist photos. Example: if the measured height is right but 
 **Command-line arguments changing module constants**: `--open` and friends must change module-level constants like `GRIP_OPEN` used in `plan()`, so `main()` starts with
 `global GRIP_OPEN, ...` before assigning them. 📘 Python requires the `global` statement to come before the first use of the name inside the function,
 otherwise `SyntaxError: name ... is used prior to global declaration` (the `argparse` defaults would use it first).
+
+---
+
+## 15. Remote inference: `make_server_config.py` and `cloud/hf_jobs/serve_pi05.py`
+
+π₀.₅ needs about 17 GB of GPU memory in float32, and the laptop has 8 GB. LeRobot 0.7 can split a rollout in two:
+`lerobot-policy-server` loads the model on a GPU machine, and `lerobot-rollout --inference.type=remote` runs the arm and cameras on the laptop.
+The two talk over [Zenoh](https://zenoh.io/) on TCP port 7447. We put the server on an HF Jobs GPU and reach it through an SSH tunnel.
+
+### `scripts/make_server_config.py`: the server's contract
+
+The server won't guess: every input must be declared with its name, shape, dtype and a "semantics" string, and the action with its joint order.
+The script reads all of it from files that already have it:
+
+- the checkpoint's `policy_preprocessor.json` → the rename map (`observation.images.top` → `observation.images.base_0_rgb`, ...);
+- the dataset's `meta/info.json` → camera size (480×640×3, `uint8`, `kind: rgb`), joint names for the state and the action, and the fps.
+
+Each input is declared under the name **the model** expects, because the server replaces the checkpoint's rename step with an empty one.
+The laptop maps its camera names onto those with `--rename_map` (§4). `SEMANTICS = "so101_follower_v1"` is just a label that both sides must agree on.
+`--model-path` is where the checkpoint will be on the server (`/tmp/pi05` in the job). The listen endpoint `tcp/127.0.0.1:7447` is local to the server machine, so it can only be reached through the tunnel.
+
+### `cloud/hf_jobs/serve_pi05.py`: start the server on HF Jobs
+
+`HfApi().run_job(...)` with `ssh=True` starts a container on `a10g-large` and gives it an SSH address, `<job_id>@ssh.hf.jobs`. The SSH key is the one added at huggingface.co/settings/keys.
+The container runs a short bash script:
+
+1. Install `lerobot[pi,remote]==0.7.0`. The image ships a newer LeRobot, but the remote-inference protocol is versioned, so the server must match the laptop.
+2. Download the public checkpoint into `/tmp/pi05` with `hf download` (16.6 GB).
+3. Write the server config (passed in as the `SERVER_CONFIG` environment variable) and the launcher (`LAUNCHER`) to files.
+4. `exec` the launcher. The server becomes the container's main process, so `hf jobs cancel` stops it.
+
+The submit script then waits until the job is `RUNNING` and prints the exact `ssh -N -L 7447:127.0.0.1:7447 ...` command. 📘 `-N` means "run no remote command, only forward ports"; `-L local:host:remote` forwards the laptop's port 7447 to 127.0.0.1:7447 inside the container.
+
+Why `a10g-large` rather than `a10g-small`: both have a 24 GB A10G, but loading a 16.6 GB float32 checkpoint needs more than the small flavor's 15 GB of RAM.
+
+### `cloud/hf_jobs/pi05_server_launch.py`: one missing override
+
+Before serving, LeRobot 0.7 calls `policy.validate_chunk_input_features(...)`. The default check insists that the declared inputs match the checkpoint's `input_features` exactly: same names, same shapes.
+π₀.₅'s config lists three 3×224×224 cameras and a 32-dim state. The robot sends two 480×640×3 cameras and 6 joints, so the first job stopped with
+`Canonical feature names must exactly match policy input_features`.
+
+Nothing is actually wrong. At run time π₀.₅ resizes each image to 224×224 with padding, pads the state to 32 dims, and fills a missing camera with an empty image that is masked out of attention.
+That is exactly what happens in local inference. SmolVLA is in the same situation and overrides the check; π₀.₅ doesn't yet.
+The launcher replaces the check with the same rules as SmolVLA's:
+
+- every non-camera input is present;
+- only known camera names;
+- at least one camera;
+- cameras are H×W×3 RGB;
+- the state is no longer than `max_state_dim`.
+
+Then it calls the normal `lerobot-policy-server` `main()`. The model, the processors and the server logic are untouched.

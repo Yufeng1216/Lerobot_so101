@@ -44,25 +44,26 @@ Everything runs end to end on real hardware: data collection → training → de
 
 ## Results
 
-> **Status:** ACT, Diffusion Policy and SmolVLA done; π₀.₅ (needs a rented GPU for inference) and the training-free VLM agent are next.
+> **Status:** ACT, Diffusion Policy, SmolVLA and π₀.₅ done; the training-free VLM agent is next.
 
 | Policy | Success | 95% CI | Grasped, not placed | Not grasped | Per spot ①②③④⑤ | Sheet |
 |---|---|---|---|---|---|---|
 | ACT | **14/40** (35%) | 22–51% | 4 | 22 | 1 · 0 · 2 · 6 · 5 | [act](results/act.md) |
 | Diffusion Policy | **25/40** (62.5%) | 47–76% | 7 | 8 | 6 · 6 · 4 · 7 · 2 | [diffusion](results/diffusion.md) |
 | SmolVLA | **26/40** (65%) | 50–78% | 0 | 14 | 2 · 3 · 7 · 7 · 7 | [smolvla](results/smolvla.md) |
-| π₀.₅ | – | | | | | |
+| π₀.₅ | **34/40** (85%) | 71–93% | 0 | 6 | 7 · 5 · 7 · 8 · 7 | [pi05](results/pi05.md) |
 | VLM agent + IK | – | | | | | |
 
 <sub>Success = toy released inside the box within 30 s. 95% CI: Wilson score interval. Per spot: successes out of 8.
-Diffusion and SmolVLA are each better than ACT (Fisher's exact test p = 0.025 and 0.013); they are not distinguishable from each other (p = 1.0).</sub>
+Diffusion and SmolVLA are each better than ACT (Fisher's exact test p = 0.025 and 0.013); they are not distinguishable from each other (p = 1.0).
+π₀.₅ is better than ACT (p < 0.0001) and Diffusion (p = 0.041); vs. SmolVLA p = 0.069. π₀.₅ ran on a cloud GPU through remote inference ([docs/07](docs/07_pi05.md)).</sub>
 
 | Policy | Steps × batch | Samples seen (epochs) | Train time | Inference per chunk | Model |
 |---|---|---|---|---|---|
 | ACT | 50k × 8 | 400k (≈27) | 4.0 h, RTX 3070 Laptop | ~47 ms | [🤗](https://huggingface.co/Yufeng1216/act_so101_pick_place) |
 | Diffusion Policy | 100k × 8 | 800k (≈53) | ≈4 h, V100 | ~200 ms (DDIM, 10 steps) | [🤗](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) |
 | SmolVLA | 20k × 32 | 640k (≈43) | ≈14 h, V100 | ~0.38 s, RTX 3070 Laptop | [🤗](https://huggingface.co/Yufeng1216/smolvla_so101_pick_place) |
-| π₀.₅ | 3k × 32 | 96k (≈6) | 7.1 h, A100 80 GB (≈ $18) | needs ≥ 24 GB GPU | [🤗](https://huggingface.co/Yufeng1216/pi05_so101_pick_place) |
+| π₀.₅ | 3k × 32 | 96k (≈6) | 7.1 h, A100 80 GB (≈ $18) | ~0.45 s, A10G (HF Jobs, remote) | [🤗](https://huggingface.co/Yufeng1216/pi05_so101_pick_place) |
 
 <sub>Steps aren't comparable across rows (different batch sizes, model sizes and pretraining), so samples seen and training time are listed to compare budgets. Epochs over the 15k-frame training split.</sub>
 

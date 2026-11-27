@@ -131,6 +131,7 @@ Lerobot/
 │   ├── train.ps1          training entry point: per-policy presets
 │   ├── lerobot_train_win.py  lerobot-train with the Windows fixes (see docs/04_act.md)
 │   ├── align_camera.py    puts a bumped camera back where it was, against a frame from the recording
+│   ├── make_server_config.py  server config for remote inference (π₀.₅ on a cloud GPU)
 │   ├── make_gif.py        cuts an evaluation trial into a GIF for the README
 │   └── plot_results.py    per-spot success chart from results/*.md
 ├── cloud/                 training elsewhere (models that don't fit the laptop's 8 GB)
@@ -140,7 +141,7 @@ Lerobot/
 │   │   ├── setup_env.sh   one-time environment setup
 │   │   ├── submit.sh      checks the account, then submits
 │   │   └── train.sbatch   the training job itself
-│   └── hf_jobs/train_pi05.py  submits π₀.₅ training to rented Hugging Face GPUs
+│   └── hf_jobs/           rented Hugging Face GPUs: π₀.₅ training (train_pi05.py) and its inference server for evaluation (serve_pi05.py)
 ├── zero_shot/             the training-free baselines (VLM + IK): kinematics, homography calibration, local VLM pointing, real-robot grasp script run_grasp.py
 ├── results/               per-trial real-robot evaluation sheets
 ├── assets/                GIFs and charts for the README

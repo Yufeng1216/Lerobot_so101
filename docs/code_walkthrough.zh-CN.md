@@ -20,6 +20,7 @@ Python / PowerShell 语法在第一次出现时解释（标为 📘）。
 | 4 训练 | [`lerobot_train_win.py`](#8-scriptslerobot_train_winpy) | 修复 Windows 上的 checkpoint 链接问题 |
 | 5 云端 | [`cloud/slurm/*`](#10-cloudslurm在-gpu-集群上训练) | 在 Linux GPU 集群上装环境、提交训练任务 |
 | 5 云端 | [`cloud/hf_jobs/train_pi05.py`](#13-cloudhf_jobstrain_pi05py) | 把 π₀.₅ 训练提交到租用的 HF GPU |
+| 6 评估 | [`make_server_config.py`、`serve_pi05.py`](#15-远程推理make_server_configpy-和-cloudhf_jobsserve_pi05py) | π₀.₅ 在 HF Jobs 的 GPU 上跑，笔记本控制机械臂 |
 | 6 评估 | [`make_gif.py`](#11-scriptsmake_gifpy) | 把一次评估试验剪成 README 用的 GIF |
 | 6 评估 | [`plot_results.py`](#12-scriptsplot_resultspy) | 从 `results/*.md` 画各点位成功率柱状图 |
 | 7 零样本 | [`zero_shot/*`](#14-zero_shot零样本基线) | 运动学、单应性标定、VLM 指向（不用示范训练的基线） |
@@ -349,6 +350,7 @@ switch ($Command) {
 - `-Episodes` 没写时默认 20 而不是 record 的 50：`$PSBoundParameters.ContainsKey("Episodes")` 判断用户有没有显式传这个参数。
 - `--dataset.push_to_hub=false`：评估录像只留在本地。
 - **VLA 的相机改名**：SmolVLA、π₀.₅ 微调时用了 `--rename_map`（top → camera1……），这个对应关系存在模型的 `policy_preprocessor.json` 里。但 `lerobot-rollout` 在预处理器运行**之前**就会检查相机名，只有命令里带了 `--rename_map` 才跳过检查。所以 `eval` 会从这个文件里读出 `rename_observations_processor` 这一步，把同样的对应关系传下去；ACT、Diffusion 没有这一步，就什么都不加。里面的引号写成 `\"`，原因见第 7 节（PowerShell 5.1 会吃掉普通引号）。
+- **`-Remote`**（π₀.₅ 放不进笔记本显卡）：不传 `--policy.path`，改传 `--inference.type=remote`，再带上部署名（本地 `config.json` 里的策略 `type`）和 `make_server_config.py` 写进去的语义字符串，两边对得上才能连；画面用 JPEG 传。`--inference.refill_seconds=1.0` 让当前动作块还剩 1 秒时就请求下一块（默认 0.5 秒），云端往返 1 秒以内机械臂都不会停顿。相机改名仍然从本地模型读，因为服务端会把自己的改名步骤清空。见第 15 节。
 - **自动接着录**：同名评估数据集已存在（有 `meta\info.json`）时，自动加 `--resume=true --dataset.root=...`。
   这样一个策略可以分几次测完（每次 `-Episodes 5`），不用记 `-Resume`。和 `record` 不同：录示范时重名多半是失误，要明确加 `-Resume`；
   评估时同名就是"同一组实验"。
@@ -1002,3 +1004,54 @@ step = J.T @ solve(J @ J.T + λ² I, -r)          # 阻尼最小二乘（DLS）
 **命令行参数改全局常量**：`--open` 等要影响 `plan()` 里用到的 `GRIP_OPEN` 等模块级常量，所以 `main()` 开头写
 `global GRIP_OPEN, ...` 再赋值。📘 Python 规定 `global` 声明必须出现在函数里第一次使用这个名字之前，
 否则报 `SyntaxError: name ... is used prior to global declaration`（`argparse` 的默认值就会先用到它）。
+
+---
+
+## 15. 远程推理：`make_server_config.py` 和 `cloud/hf_jobs/serve_pi05.py`
+
+π₀.₅ 用 float32 要约 17 GB 显存，笔记本只有 8 GB。LeRobot 0.7 可以把一次 rollout 拆成两半：
+`lerobot-policy-server` 在 GPU 机器上加载模型，`lerobot-rollout --inference.type=remote` 在笔记本上管机械臂和相机。
+两边通过 [Zenoh](https://zenoh.io/) 走 TCP 7447 端口通信。我们把服务端放在 HF Jobs 的 GPU 上，用 SSH 隧道连过去。
+
+### `scripts/make_server_config.py`：服务端的"合同"
+
+服务端不会去猜：每路输入都要写清楚名字、形状、类型和一个"语义"字符串，动作要写清楚关节顺序。这些信息本来就有，脚本直接从文件里读：
+
+- 模型的 `policy_preprocessor.json` → 改名表（`observation.images.top` → `observation.images.base_0_rgb`……）；
+- 数据集的 `meta/info.json` → 画面大小（480×640×3、`uint8`、`kind: rgb`）、状态和动作的关节名，还有 fps。
+
+每路输入都用**模型**要的名字来声明，因为服务端会把模型里的改名步骤换成空的。
+笔记本这边用 `--rename_map` 把自己的相机名对上去（第 4 节）。`SEMANTICS = "so101_follower_v1"` 只是两边约定好的一个标签。
+`--model-path` 是模型在服务端机器上的位置（Job 里是 `/tmp/pi05`）。监听地址 `tcp/127.0.0.1:7447` 只在服务端本机上，所以只能通过隧道连。
+
+### `cloud/hf_jobs/serve_pi05.py`：在 HF Jobs 上起服务端
+
+`HfApi().run_job(...)` 带上 `ssh=True`，会在 `a10g-large` 上起一个容器，并给它一个 SSH 地址 `<job_id>@ssh.hf.jobs`。SSH 用的是加在 huggingface.co/settings/keys 的公钥。
+容器里跑一小段 bash：
+
+1. 装 `lerobot[pi,remote]==0.7.0`。镜像自带的 LeRobot 版本更新，但远程推理协议带版本号，服务端必须和笔记本一致。
+2. 用 `hf download` 把公开的模型下载到 `/tmp/pi05`（16.6 GB）。
+3. 把服务端配置（通过环境变量 `SERVER_CONFIG` 传进去）和启动脚本（`LAUNCHER`）写成文件。
+4. `exec` 启动脚本。服务端成了容器的主进程，所以 `hf jobs cancel` 就能把它停掉。
+
+提交脚本接着等 Job 进入 `RUNNING`，然后打印出完整的 `ssh -N -L 7447:127.0.0.1:7447 ...` 命令。📘 `-N` 表示"不在远端执行命令，只转发端口"；`-L 本地:主机:远端` 把笔记本的 7447 端口转发到容器里的 127.0.0.1:7447。
+
+为什么用 `a10g-large` 而不用 `a10g-small`：两个都是 24 GB 的 A10G，但加载 16.6 GB 的 float32 模型，small 的 15 GB 内存不够。
+
+### `cloud/hf_jobs/pi05_server_launch.py`：补一个缺的覆盖
+
+开始服务前，LeRobot 0.7 会调用 `policy.validate_chunk_input_features(...)`。默认的检查要求声明的输入和模型的 `input_features` 完全一致：名字一样、形状一样。
+π₀.₅ 的配置写的是 3 个 3×224×224 的相机和 32 维的状态。机械臂发的是 2 个 480×640×3 的相机和 6 个关节，所以第一次的 Job 直接报
+`Canonical feature names must exactly match policy input_features` 退出了。
+
+其实没有问题。π₀.₅ 推理时会把每张图带填充地缩放到 224×224，把状态补到 32 维，把缺的相机填成空图，并在注意力里遮掉。
+本地推理也完全是这样做的。SmolVLA 也是这种情况，它覆盖了这个检查；π₀.₅ 还没有。
+启动脚本用和 SmolVLA 一样的规则替换这个检查：
+
+- 非相机的输入都要有；
+- 相机名都是已知的；
+- 至少有一个相机；
+- 相机是 H×W×3 的 RGB；
+- 状态不超过 `max_state_dim`。
+
+然后调用正常的 `lerobot-policy-server` 的 `main()`。模型、预处理和服务端逻辑都没动。

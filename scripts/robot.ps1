@@ -13,7 +13,10 @@
   .\scripts\robot.ps1 rollout -Policy outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model
   .\scripts\robot.ps1 eval -Policy outputs/train/act_so101_pick_place/checkpoints/last/pretrained_model -Name act
       # 20 recorded trials (docs/08_evaluation.md) -> local dataset <hf_user>/rollout_eval_act
-      # run it again with the same -Name and it appends (e.g. -Episodes 5, alternating policies)
+      # run it again with the same -Name and it appends (e.g. -Episodes 5 per block)
+  .\scripts\robot.ps1 eval -Policy outputs/train/pi05_so101_pick_place/pretrained_model -Name pi05 -Remote
+      # the policy runs in lerobot-policy-server on another machine (SSH tunnel to 127.0.0.1:7447);
+      # -Policy is still the local copy, read only for its deployment name and camera mapping
 
   Any extra arguments are passed straight through to the LeRobot command, e.g.
   .\scripts\robot.ps1 record -Name test -Episodes 2 --dataset.episode_time_s=20
@@ -33,6 +36,7 @@ param(
     [switch]$NoPush,           # record: keep the dataset local, don't upload to the Hub
     [string]$Policy,           # rollout / eval: local checkpoint dir or Hub repo id
     [int]$Duration = 0,        # rollout: seconds, 0 = until Ctrl+C
+    [switch]$Remote,           # eval: use lerobot-policy-server at 127.0.0.1:7447 (scripts/make_server_config.py)
     [switch]$DryRun,
 
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -127,7 +131,18 @@ switch ($Command) {
         $exe = "lerobot-rollout"
         # LeRobot requires rollout datasets to be named rollout_*.
         $repoId = "$($cfg.hf_user)/rollout_eval_$Name"
-        $argsList = @("--strategy.type=episodic", "--policy.path=$Policy") + $follower + $leader + @(
+        if ($Remote) {
+            # Same deployment name and semantics string as scripts/make_server_config.py writes.
+            $type = (Get-Content (Join-Path $Policy "config.json") -Raw | ConvertFrom-Json).type
+            $policyArgs = @("--inference.type=remote", "--inference.deployment=$type",
+                            "--inference.semantics=so101_follower_v1", "--inference.encoding=jpeg",
+                            # ask for the next chunk 1 s before the current one runs out (default 0.5 s),
+                            # so a cloud round trip of up to ~1 s doesn't make the arm pause
+                            "--inference.refill_seconds=1.0")
+        } else {
+            $policyArgs = @("--policy.path=$Policy")
+        }
+        $argsList = @("--strategy.type=episodic") + $policyArgs + $follower + $leader + @(
             $cameraArg,
             "--dataset.repo_id=$repoId",
             "--dataset.no_stamp=true",

@@ -43,25 +43,26 @@
 
 ## 结果
 
-> **状态：** ACT、Diffusion Policy、SmolVLA 已测完；接下来是 π₀.₅（推理要租 GPU）和免训练的 VLM 智能体。
+> **状态：** ACT、Diffusion Policy、SmolVLA、π₀.₅ 已测完；接下来是免训练的 VLM 智能体。
 
 | 策略 | 成功 | 95% 区间 | 抓起没放进 | 没抓起 | 各点位 ①②③④⑤ | 记录 |
 |---|---|---|---|---|---|---|
 | ACT | **14/40**（35%） | 22–51% | 4 | 22 | 1 · 0 · 2 · 6 · 5 | [act](results/act.zh-CN.md) |
 | Diffusion Policy | **25/40**（62.5%） | 47–76% | 7 | 8 | 6 · 6 · 4 · 7 · 2 | [diffusion](results/diffusion.zh-CN.md) |
 | SmolVLA | **26/40**（65%） | 50–78% | 0 | 14 | 2 · 3 · 7 · 7 · 7 | [smolvla](results/smolvla.zh-CN.md) |
-| π₀.₅ | – | | | | | |
+| π₀.₅ | **34/40**（85%） | 71–93% | 0 | 6 | 7 · 5 · 7 · 8 · 7 | [pi05](results/pi05.zh-CN.md) |
 | VLM 智能体 + IK | – | | | | | |
 
 <sub>成功 = 30 秒内玩具放进盒子并松开。95% 区间：Wilson 区间。各点位：8 次里成功几次。
-Diffusion 和 SmolVLA 都显著好于 ACT（Fisher 精确检验 p = 0.025 和 0.013），两者之间分不出差别（p = 1.0）。</sub>
+Diffusion 和 SmolVLA 都显著好于 ACT（Fisher 精确检验 p = 0.025 和 0.013），两者之间分不出差别（p = 1.0）。
+π₀.₅ 好于 ACT（p < 0.0001）和 Diffusion（p = 0.041）；和 SmolVLA 比 p = 0.069。π₀.₅ 在云端 GPU 上通过远程推理运行（[docs/07](docs/07_pi05.zh-CN.md)）。</sub>
 
 | 策略 | 步数 × batch | 看过的样本（epoch） | 训练时长 | 每个动作块推理 | 模型 |
 |---|---|---|---|---|---|
 | ACT | 50k × 8 | 400k (≈27) | 4.0 h，RTX 3070 Laptop | ~47 ms | [🤗](https://huggingface.co/Yufeng1216/act_so101_pick_place) |
 | Diffusion Policy | 100k × 8 | 800k (≈53) | ≈4 h，V100 | ~200 ms（DDIM 10 步） | [🤗](https://huggingface.co/Yufeng1216/diffusion_so101_pick_place) |
 | SmolVLA | 20k × 32 | 640k (≈43) | ≈14 h，V100 | ~0.38 s，RTX 3070 Laptop | [🤗](https://huggingface.co/Yufeng1216/smolvla_so101_pick_place) |
-| π₀.₅ | 3k × 32 | 96k (≈6) | 7.1 h，A100 80 GB（≈ $18） | 要 ≥ 24 GB 的 GPU | [🤗](https://huggingface.co/Yufeng1216/pi05_so101_pick_place) |
+| π₀.₅ | 3k × 32 | 96k (≈6) | 7.1 h，A100 80 GB（≈ $18） | ~0.45 s，A10G（HF Jobs，远程） | [🤗](https://huggingface.co/Yufeng1216/pi05_so101_pick_place) |
 
 <sub>各行的步数不能直接比（batch、模型大小、有没有预训练都不同），所以列出看过的样本数和训练时长来对照预算。epoch 按 1.5 万帧的训练集计算。</sub>
 
