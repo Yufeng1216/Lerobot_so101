@@ -21,12 +21,12 @@
 **任务：** 从 5 个标记点之一抓起毛绒玩具，放进快递盒。
 **数据集：** 50 条示范，[`Yufeng1216/so101_pick_place`](https://huggingface.co/datasets/Yufeng1216/so101_pick_place)。
 
-| ACT · 点位 ⑤ | Diffusion Policy · 点位 ② | SmolVLA · 点位 ③ | VLM 智能体 · 点位 ② |
+| ACT · 点位 ⑤ | Diffusion Policy · 点位 ② | SmolVLA · 点位 ③ | VLM 智能体 · 点位 ⑤ |
 |---|---|---|---|
 | ![ACT 运行](assets/act_success.gif) | ![Diffusion Policy 运行](assets/diffusion_success.gif) | ![SmolVLA 运行](assets/smolvla_success.gif) | ![VLM 智能体运行](assets/vlm_agent_success.gif) |
 
 <sub>评估时录下的自主运行片段，2 倍速。每段左边是俯视相机，右边是腕部相机。
-VLM 智能体：评估结束后单独录的一次演示（同一个冻结的智能体），3 倍速，模型思考时机械臂静止的停顿剪短了。</sub>
+VLM 智能体：评估结束后单独录的一次演示（同一个冻结的智能体），3 倍速，模型思考时机械臂静止的停顿剪短了；这次尝试实际用了 122 秒。</sub>
 
 ## 工作原理
 
