@@ -439,7 +439,9 @@ def main() -> None:
     args = ap.parse_args()
 
     import anthropic
-    client = anthropic.Anthropic()
+    # Network only: a dropped connection (WinError 10054 ended trial 34 after the SDK's default 2
+    # retries) is retried up to 8 times with backoff. Requests and model behaviour are unchanged.
+    client = anthropic.Anthropic(max_retries=8)
     out = ROOT / "outputs" / "zero_shot" / args.name
     out.mkdir(parents=True, exist_ok=True)
     robot = Robot(args.dry_run, load_frame(args.frame) if args.dry_run else None, step=args.step)
